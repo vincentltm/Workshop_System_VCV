@@ -46,7 +46,7 @@ RACK2_PLUGIN_DIR = $(HOME)/Library/Application\ Support/Rack2/plugins-mac-arm64
 clean: clean-submodule
 
 clean-submodule:
-	-$(MAKE) -C deps/Workshop_Computer_VCV clean
+	-$(MAKE) -C deps/Workshop_Computer_VCV clean RACK_DIR=$(abspath $(RACK_DIR))
 	rm -rf res/cards res/web res/backyard_rain res/wav res/vcv_bridge.js
 
 install-dev: copy-cards all
