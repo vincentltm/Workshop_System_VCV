@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="100%" height="100%" viewBox="0 0 630 380" version="1.1"
+     xmlns="http://www.w3.org/2000/svg"
+     style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;">
+  
+  <!-- Main panel background -->
+  <rect x="0" y="0" width="630" height="380" fill="#141414"/>
+  
+  <!-- Outer border stroke -->
+  <rect x="1.5" y="1.5" width="627" height="377" rx="3" fill="none" stroke="#2b2b2b" stroke-width="1.5"/>
+
+  <!-- Corner screw holes -->
+  <g transform="translate(7.5, 7.5)">
+    <circle cx="0" cy="0" r="4.5" fill="#222" stroke="#444" stroke-width="0.8"/>
+    <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="#111" stroke-width="1"/>
+    <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="#111" stroke-width="1"/>
+  </g>
+  <g transform="translate(622.5, 7.5)">
+    <circle cx="0" cy="0" r="4.5" fill="#222" stroke="#444" stroke-width="0.8"/>
+    <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="#111" stroke-width="1"/>
+    <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="#111" stroke-width="1"/>
+  </g>
+  <g transform="translate(7.5, 372.5)">
+    <circle cx="0" cy="0" r="4.5" fill="#222" stroke="#444" stroke-width="0.8"/>
+    <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="#111" stroke-width="1"/>
+    <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="#111" stroke-width="1"/>
+  </g>
+  <g transform="translate(622.5, 372.5)">
+    <circle cx="0" cy="0" r="4.5" fill="#222" stroke="#444" stroke-width="0.8"/>
+    <line x1="-2.5" y1="-2.5" x2="2.5" y2="2.5" stroke="#111" stroke-width="1"/>
+    <line x1="-2.5" y1="2.5" x2="2.5" y2="-2.5" stroke="#111" stroke-width="1"/>
+  </g>
+
+  <!-- Level Converter Bunched-Up Box (centered at x=315) -->
+  <rect x="265" y="8" width="100" height="28" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="280" cy="22" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="300" cy="22" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="330" cy="22" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="350" cy="22" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+
+  <!-- Horizontal divider line under title/converter -->
+  <line x1="8" y1="42" x2="622" y2="42" stroke="#2b2b2b" stroke-width="1.2"/>
+
+  <!-- Vertical column dividers -->
+  <line x1="126" y1="42" x2="126" y2="380" stroke="#2b2b2b" stroke-width="1.2"/>
+  <line x1="252" y1="42" x2="252" y2="380" stroke="#2b2b2b" stroke-width="1.2"/>
+  <line x1="378" y1="42" x2="378" y2="380" stroke="#2b2b2b" stroke-width="1.2"/>
+  <line x1="504" y1="42" x2="504" y2="380" stroke="#2b2b2b" stroke-width="1.2"/>
+
+
+  <!-- ==========================================
+       COLUMN 1: FUZZ (Red Theme, col_x = 0)
+       ========================================== -->
+  <!-- Lightning Bolt Left -->
+  <path d="M 33,48 L 41,53 L 39,55 L 45,54 L 39,61 L 41,57 L 35,55 Z" fill="#b0b0b0"/>
+  <!-- Lightning Bolt Right -->
+  <path d="M 93,48 L 85,53 L 87,55 L 81,54 L 87,61 L 85,57 L 91,55 Z" fill="#b0b0b0"/>
+  
+  <!-- Large Knob Shadow Ring -->
+  <circle cx="63" cy="95" r="18" fill="none" stroke="#222" stroke-width="0.8"/>
+  <!-- Small Knobs Shadow Rings -->
+  <circle cx="33" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="93" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+
+  <!-- Separator line -->
+  <line x1="8" y1="234" x2="118" y2="234" stroke="#222" stroke-width="1"/>
+
+  <!-- Jacks Section -->
+  <!-- Audio Group Box (IN, OUT L, OUT R) -->
+  <rect x="15" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="25" cy="265" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="25" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="48" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <path d="M 25,272 L 25,298 M 25,305 L 41,305" fill="none" stroke="#505050" stroke-width="0.8"/>
+
+  <!-- CV Group Box -->
+  <rect x="68" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="78" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="101" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <rect x="69" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+  <rect x="92" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+
+  <!-- Trapezoid Plate (Red Outline) -->
+  <path d="M 42,333 L 84,333 L 93,365 L 33,365 Z" fill="#231c1c" stroke="#b83c3c" stroke-width="1.2"/>
+  <circle cx="63" cy="340" r="3.2" fill="none" stroke="#444" stroke-width="0.8"/>
+
+
+  <!-- ==========================================
+       COLUMN 2: DELAY (Purple Theme, col_x = 126)
+       ========================================== -->
+  <!-- Clock Left -->
+  <circle cx="154" cy="52" r="5" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+  <line x1="154" y1="52" x2="154" y2="49.5" stroke="#b0b0b0" stroke-width="0.8"/>
+  <line x1="154" y1="52" x2="156.5" y2="52" stroke="#b0b0b0" stroke-width="0.8"/>
+  <!-- Clock Right -->
+  <circle cx="224" cy="52" r="5" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+  <line x1="224" y1="52" x2="224" y2="49.5" stroke="#b0b0b0" stroke-width="0.8"/>
+  <line x1="224" y1="52" x2="226.5" y2="52" stroke="#b0b0b0" stroke-width="0.8"/>
+
+  <circle cx="189" cy="95" r="18" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="159" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="219" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+
+  <line x1="134" y1="234" x2="244" y2="234" stroke="#222" stroke-width="1"/>
+
+  <!-- Jacks Section -->
+  <rect x="141" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="151" cy="265" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="151" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="174" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <path d="M 151,272 L 151,298 M 151,305 L 167,305" fill="none" stroke="#505050" stroke-width="0.8"/>
+
+  <rect x="194" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="204" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="227" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <rect x="195" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+  <rect x="218" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+
+  <!-- Trapezoid Plate (Purple Outline) -->
+  <path d="M 168,333 L 210,333 L 219,365 L 159,365 Z" fill="#242038" stroke="#6a54c9" stroke-width="1.2"/>
+  <circle cx="189" cy="340" r="3.2" fill="none" stroke="#444" stroke-width="0.8"/>
+
+
+  <!-- ==========================================
+       COLUMN 3: CHORUS (Blue Theme, col_x = 252)
+       ========================================== -->
+  <!-- Wave Left -->
+  <path d="M 270,51 Q 273,48 276,51 T 282,51 Q 285,48 288,51" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+  <path d="M 270,55 Q 273,52 276,55 T 282,55 Q 285,52 288,55" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+  <!-- Wave Right -->
+  <path d="M 342,51 Q 345,48 348,51 T 354,51 Q 357,48 360,51" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+  <path d="M 342,55 Q 345,52 348,55 T 354,55 Q 357,52 360,55" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+
+  <circle cx="315" cy="95" r="18" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="285" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="345" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+
+  <!-- Mode switch wavy graphics -->
+  <path d="M 293,208 Q 296,205 299,208 T 305,208" fill="none" stroke="#555" stroke-width="0.8"/>
+  <path d="M 293,212 Q 296,209 299,212 T 305,212" fill="none" stroke="#555" stroke-width="0.8"/>
+  <path d="M 325,208 Q 328,205 331,208 T 337,208" fill="none" stroke="#555" stroke-width="0.8"/>
+  <path d="M 325,212 Q 328,209 331,212 T 337,212" fill="none" stroke="#555" stroke-width="0.8"/>
+
+  <line x1="260" y1="234" x2="370" y2="234" stroke="#222" stroke-width="1"/>
+
+  <!-- Jacks Section -->
+  <rect x="267" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="277" cy="265" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="300" cy="265" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="277" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="300" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <path d="M 277,272 C 277,285 300,285 300,298" fill="none" stroke="#505050" stroke-width="0.8" stroke-dasharray="2,2"/>
+  <path d="M 300,272 C 300,285 277,285 277,298" fill="none" stroke="#505050" stroke-width="0.8" stroke-dasharray="2,2"/>
+
+  <rect x="320" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="330" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="353" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <rect x="321" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+  <rect x="344" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+
+  <!-- Trapezoid Plate (Blue Outline) -->
+  <path d="M 294,333 L 336,333 L 345,365 L 285,365 Z" fill="#1a2636" stroke="#2f7bc2" stroke-width="1.2"/>
+  <circle cx="315" cy="340" r="3.2" fill="none" stroke="#444" stroke-width="0.8"/>
+
+
+  <!-- ==========================================
+       COLUMN 4: REVERB (Teal Theme, col_x = 378)
+       ========================================== -->
+  <!-- Room Left -->
+  <path d="M 395,54 L 395,48 L 401,45 L 407,48 L 407,54 Z M 395,48 L 407,48 M 401,45 L 401,48" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+  <!-- Room Right -->
+  <path d="M 475,54 L 475,48 L 481,45 L 487,48 L 487,54 Z M 475,48 L 487,48 M 481,45 L 481,48" fill="none" stroke="#b0b0b0" stroke-width="1"/>
+
+  <circle cx="441" cy="95" r="18" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="411" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+
+  <line x1="386" y1="234" x2="496" y2="234" stroke="#222" stroke-width="1"/>
+
+  <!-- Jacks Section -->
+  <rect x="393" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="403" cy="265" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="426" cy="265" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="403" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="426" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <path d="M 403,272 C 403,285 426,285 426,298" fill="none" stroke="#505050" stroke-width="0.8" stroke-dasharray="2,2"/>
+  <path d="M 426,272 C 426,285 403,285 403,298" fill="none" stroke="#505050" stroke-width="0.8" stroke-dasharray="2,2"/>
+
+  <rect x="446" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="456" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="479" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <rect x="447" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+  <rect x="470" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+
+  <!-- Trapezoid Plate (Teal Outline) -->
+  <path d="M 420,333 L 462,333 L 471,365 L 411,365 Z" fill="#192e2c" stroke="#25ab9f" stroke-width="1.2"/>
+  <circle cx="441" cy="340" r="3.2" fill="none" stroke="#444" stroke-width="0.8"/>
+
+
+  <!-- ==========================================
+       COLUMN 5: BOOST (Grey Theme, col_x = 504)
+       ========================================== -->
+  <!-- Flame Left -->
+  <path d="M 533,56 C 533,52 536,49 538,46 C 540,49 543,52 543,56 C 543,59 541,61 538,61 C 535,61 533,59 533,56 Z" fill="#b0b0b0"/>
+  <!-- Flame Right -->
+  <path d="M 591,56 C 591,52 594,49 596,46 C 598,49 601,52 601,56 C 601,59 599,61 596,61 C 593,61 591,59 591,56 Z" fill="#b0b0b0"/>
+
+  <circle cx="567" cy="95" r="18" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="537" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+  <circle cx="597" cy="165" r="9.5" fill="none" stroke="#222" stroke-width="0.8"/>
+
+  <line x1="512" y1="234" x2="622" y2="234" stroke="#222" stroke-width="1"/>
+
+  <!-- Jacks Section -->
+  <rect x="519" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="529" cy="265" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="529" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <circle cx="552" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <path d="M 529,272 L 529,298 M 529,305 L 545,305" fill="none" stroke="#505050" stroke-width="0.8"/>
+
+  <rect x="571" y="242" width="46" height="86" rx="2" fill="#181818" stroke="#2d2d2d" stroke-width="1"/>
+  <circle cx="594" cy="305" r="7" fill="none" stroke="#3a3a3a" stroke-width="0.8"/>
+  <rect x="585" y="296" width="18" height="18" rx="2" fill="none" stroke="#444" stroke-width="1"/>
+
+  <!-- Trapezoid Plate (Grey Outline) -->
+  <path d="M 546,333 L 588,333 L 597,365 L 537,365 Z" fill="#262626" stroke="#5a5a5a" stroke-width="1.2"/>
+  <circle cx="567" cy="340" r="3.2" fill="none" stroke="#444" stroke-width="0.8"/>
+
+  <!-- Bottom footer line -->
+  <line x1="8" y1="367" x2="622" y2="367" stroke="#2b2b2b" stroke-width="1.2"/>
+
+</svg>

@@ -1,0 +1,12 @@
+build/
+dep/
+dist/
+res/cards/
+res/web/
+res/backyard_rain/
+res/wav/
+res/vcv_bridge.js
+plugin.dylib
+plugin.dll
+plugin.so
+.DS_Store

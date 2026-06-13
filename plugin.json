@@ -1,0 +1,25 @@
+{
+  "slug": "MTMWorkshopSystem",
+  "name": "MTM Workshop System",
+  "version": "2.0.0",
+  "license": "MIT",
+  "brand": "Music Thing Modular",
+  "author": "Vincent Maurer",
+  "authorEmail": "",
+  "authorUrl": "https://musicthing.co.uk",
+  "pluginUrl": "",
+  "modules": [
+    {
+      "slug": "WorkshopSystem",
+      "name": "Workshop System",
+      "description": "Complete Music Thing Modular Workshop System – analog section. Includes 2x VCO, Stereo In, Ring Mod, Stompbox, Amplifier, 4 Voltages, 2x Humpback Filter, 2x Slopes, and Mixer. Connect to MTM Workshop Computer VCV for the computer section.",
+      "tags": ["Oscillator", "Filter", "Envelope", "Mixer", "Effect", "Utility", "Hardware Clone"]
+    },
+    {
+      "slug": "Pedalboard",
+      "name": "Pedalboard",
+      "description": "Eurorack Pedalboard with 5 built-in effects (Distortion, Phaser, Chorus, Delay, Reverb) and a Eurorack/Pedal level switch.",
+      "tags": ["Effect", "Delay", "Reverb", "Chorus", "Phaser", "Distortion", "Dual", "Utility"]
+    }
+  ]
+}
