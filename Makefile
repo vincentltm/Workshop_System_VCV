@@ -28,6 +28,10 @@ copy-cards:
 	@cp -R deps/Workshop_Computer_VCV/res/wav/ res/wav/
 	@cp deps/Workshop_Computer_VCV/res/vcv_bridge.js res/vcv_bridge.js
 
+# Distributable assets
+DISTRIBUTABLES += res
+DISTRIBUTABLES += plugin.json
+
 include $(RACK_DIR)/plugin.mk
 
 $(TARGET): | copy-cards
