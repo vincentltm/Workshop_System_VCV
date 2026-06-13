@@ -17,6 +17,8 @@ PLUGIN_NAME = MTMWorkshopSystem
 
 # Target to copy cards and web resources from Workshop_Computer_VCV submodule
 copy-cards:
+	@echo "Building Workshop_Computer_VCV submodule first..."
+	$(MAKE) -C deps/Workshop_Computer_VCV RACK_DIR=$(abspath $(RACK_DIR))
 	@echo "Copying card libraries and web resources from Workshop_Computer_VCV submodule..."
 	@mkdir -p res/cards
 	@cp -R deps/Workshop_Computer_VCV/res/cards/ res/cards/
@@ -39,7 +41,13 @@ $(TARGET): | copy-cards
 # Extra install rule pointing to the VCV Rack 2 plugin dir
 RACK2_PLUGIN_DIR = $(HOME)/Library/Application\ Support/Rack2/plugins-mac-arm64
 
-.PHONY: copy-cards
+.PHONY: copy-cards clean-submodule
+
+clean: clean-submodule
+
+clean-submodule:
+	-$(MAKE) -C deps/Workshop_Computer_VCV clean
+	rm -rf res/cards res/web res/backyard_rain res/wav res/vcv_bridge.js
 
 install-dev: copy-cards all
 	@echo "Installing to $(RACK2_PLUGIN_DIR)/$(PLUGIN_NAME)..."
