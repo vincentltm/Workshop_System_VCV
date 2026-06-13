@@ -3234,14 +3234,11 @@ struct WorkshopSystemWidget : ModuleWidget {
 
       // Track incomplete cables to trigger plug click on initiation/drop on our ports
       int currentIncompleteCount = 0;
-      std::vector<app::CableWidget *> incompleteCables =
-          APP->scene->rack->getIncompleteCables();
-      for (app::CableWidget *cw : incompleteCables) {
-        if (cw) {
-          if ((cw->inputPort && cw->inputPort->module == module) ||
-              (cw->outputPort && cw->outputPort->module == module)) {
-            currentIncompleteCount++;
-          }
+      app::CableWidget *cw = APP->scene->rack->getIncompleteCable();
+      if (cw) {
+        if ((cw->inputPort && cw->inputPort->module == module) ||
+            (cw->outputPort && cw->outputPort->module == module)) {
+          currentIncompleteCount++;
         }
       }
       if (currentIncompleteCount != lastIncompleteCount) {
