@@ -999,6 +999,8 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
 
   // Stompbox normalization cache (1-sample feedback delay)
   float stompLastSend = 0.0f;
+  int stompCheckCounter = 0;
+  bool connectedToPedalboard = false;
 
 
   // Self patch flags set by widget
@@ -2132,6 +2134,27 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     outputs[RING_OUT].setVoltage(RingMod::process(ringA, ringB));
 
     // --- 7. STOMPBOX ---
+    if (++stompCheckCounter >= 512) {
+      stompCheckCounter = 0;
+      connectedToPedalboard = false;
+      std::vector<int64_t> cableIds = APP->engine->getCableIds();
+      for (int64_t id : cableIds) {
+        engine::Cable* cable = APP->engine->getCable(id);
+        if (cable) {
+          if (cable->inputModule == this || cable->outputModule == this) {
+            engine::Module* otherModule = (cable->inputModule == this) ? cable->outputModule : cable->inputModule;
+            if (otherModule && otherModule->model && otherModule->model->slug == "Pedalboard") {
+              connectedToPedalboard = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    float returnScale = connectedToPedalboard ? 1.0f : 10.0f;
+    float sendScale = connectedToPedalboard ? 1.0f : 0.09f;
+
     float stompIn = inputs[STOMP_IN].getVoltage();
     float returnIn = 0.0f;
     float returnInModular = 0.0f;
@@ -2139,8 +2162,8 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
 
     if (inputs[STOMP_RETURN].isConnected()) {
       returnIn = inputs[STOMP_RETURN].getVoltage();
-      // Boost line-level return (±1V) to modular level (±10V), clamped to ±11.5V rails
-      returnInModular = std::max(-11.5f, std::min(11.5f, returnIn * 10.0f));
+      // Boost return, clamped to ±11.5V rails
+      returnInModular = std::max(-11.5f, std::min(11.5f, returnIn * returnScale));
       wetSource = returnInModular;
     } else {
       // Normalled feedback path: return = last stompbox send
@@ -2162,8 +2185,8 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     // Save send for next sample normalization
     stompLastSend = sendModular;
 
-    // Scale send from modular to line level (0.09x, measured from stompbox_send recording)
-    outputs[STOMP_SEND].setVoltage(sendModular * 0.09f);
+    // Scale send to line level or keep modular level
+    outputs[STOMP_SEND].setVoltage(sendModular * sendScale);
     float stompOutVal = stomp.processOut(sendModular, wetSource, stompBlend);
     // Clamp the final output mix to the ±11.5V rails
     stompOutVal = std::max(-11.5f, std::min(11.5f, stompOutVal));
