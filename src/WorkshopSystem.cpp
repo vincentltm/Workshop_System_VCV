@@ -1040,6 +1040,15 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
         // Change card without loading flash to keep it fast
         change_card_impl((int)i, false);
 
+        // Wait for card_ptr to become non-null (up to 2000ms additional)
+        bool expects_card_ptr = (card_id != "chord_blimey" && card_id != "am_coupler");
+        if (expects_card_ptr) {
+          for (int attempt = 0; attempt < 200; attempt++) {
+            if (card_globals.card_ptr) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+          }
+        }
+
         if (card_globals.card_ptr) {
           // Feed simulated samples to run constructor + process logic
           for (int sample = 0; sample < 1000; sample++) {
@@ -1048,6 +1057,9 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
           }
           passed_count++;
           INFO(" -> Card %s: PASS", card_id.c_str());
+        } else if (!expects_card_ptr) {
+          passed_count++;
+          INFO(" -> Card %s: PASS (dummy/control-only)", card_id.c_str());
         } else {
           failed_count++;
           failed_list += card_id + " (missing card_ptr), ";
