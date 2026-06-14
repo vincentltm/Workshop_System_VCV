@@ -26,6 +26,8 @@ copy-cards:
 	@cp -R deps/Workshop_Computer_VCV/res/web/ res/web/
 	@mkdir -p res/backyard_rain
 	@cp -R deps/Workshop_Computer_VCV/res/backyard_rain/ res/backyard_rain/
+	@mkdir -p res/compulidean
+	@cp -R deps/Workshop_Computer_VCV/res/compulidean/ res/compulidean/
 	@mkdir -p res/wav
 	@cp -R deps/Workshop_Computer_VCV/res/wav/ res/wav/
 	@cp deps/Workshop_Computer_VCV/res/vcv_bridge.js res/vcv_bridge.js
@@ -52,7 +54,7 @@ clean: clean-submodule
 
 clean-submodule:
 	-$(MAKE) -C deps/Workshop_Computer_VCV clean RACK_DIR=$(abspath $(RACK_DIR))
-	rm -rf res/cards res/web res/backyard_rain res/wav res/vcv_bridge.js
+	rm -rf res/cards res/web res/backyard_rain res/compulidean res/wav res/vcv_bridge.js
 
 install-dev: copy-cards all
 	@echo "Installing to $(RACK2_PLUGIN_DIR)/$(PLUGIN_NAME)..."
