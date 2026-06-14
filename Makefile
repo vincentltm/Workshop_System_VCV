@@ -36,6 +36,11 @@ DISTRIBUTABLES += plugin.json
 
 include $(RACK_DIR)/plugin.mk
 
+# Link ws2_32 on Windows for the web server
+ifdef ARCH_WIN
+    LDFLAGS += -lws2_32
+endif
+
 $(TARGET): | copy-cards
 
 # Extra install rule pointing to the VCV Rack 2 plugin dir
