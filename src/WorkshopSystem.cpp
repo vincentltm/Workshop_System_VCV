@@ -2393,6 +2393,12 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
             }
           }
 
+          // Sync back utility pair indices from card mock flash to host
+          if (g_active_card_id == "utility_pair") {
+            utility_indices[0] = card_globals.g_flash_memory_val[2093056];
+            utility_indices[1] = card_globals.g_flash_memory_val[2093057];
+          }
+
           // 1.5. MIDI Input
           rack::midi::Message rx_msg;
           while (midiInput.tryPop(&rx_msg, args.frame)) {
