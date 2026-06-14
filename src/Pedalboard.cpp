@@ -167,11 +167,42 @@ struct Pedalboard : Module {
 
     enum InputIds  {
         IN_INPUT,
+        // Dummy inputs to prevent out-of-bounds crashes when loading old patches
+        PORT_DUMMY_IN_1,
+        PORT_DUMMY_IN_2,
+        PORT_DUMMY_IN_3,
+        PORT_DUMMY_IN_4,
+        PORT_DUMMY_IN_5,
+        PORT_DUMMY_IN_6,
+        PORT_DUMMY_IN_7,
+        PORT_DUMMY_IN_8,
+        PORT_DUMMY_IN_9,
+        PORT_DUMMY_IN_10,
+        PORT_DUMMY_IN_11,
+        PORT_DUMMY_IN_12,
+        PORT_DUMMY_IN_13,
+        PORT_DUMMY_IN_14,
+        PORT_DUMMY_IN_15,
+        PORT_DUMMY_IN_16,
+        PORT_DUMMY_IN_17,
+        PORT_DUMMY_IN_18,
         NUM_INPUTS
     };
 
     enum OutputIds {
         OUT_OUTPUT,
+        // Dummy outputs to prevent out-of-bounds crashes when loading old patches
+        PORT_DUMMY_OUT_1,
+        PORT_DUMMY_OUT_2,
+        PORT_DUMMY_OUT_3,
+        PORT_DUMMY_OUT_4,
+        PORT_DUMMY_OUT_5,
+        PORT_DUMMY_OUT_6,
+        PORT_DUMMY_OUT_7,
+        PORT_DUMMY_OUT_8,
+        PORT_DUMMY_OUT_9,
+        PORT_DUMMY_OUT_10,
+        PORT_DUMMY_OUT_11,
         NUM_OUTPUTS
     };
 

@@ -2134,23 +2134,7 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     outputs[RING_OUT].setVoltage(RingMod::process(ringA, ringB));
 
     // --- 7. STOMPBOX ---
-    if (++stompCheckCounter >= 512) {
-      stompCheckCounter = 0;
-      connectedToPedalboard = false;
-      std::vector<int64_t> cableIds = APP->engine->getCableIds();
-      for (int64_t id : cableIds) {
-        engine::Cable* cable = APP->engine->getCable(id);
-        if (cable) {
-          if (cable->inputModule == this || cable->outputModule == this) {
-            engine::Module* otherModule = (cable->inputModule == this) ? cable->outputModule : cable->inputModule;
-            if (otherModule && otherModule->model && otherModule->model->slug == "Pedalboard") {
-              connectedToPedalboard = true;
-              break;
-            }
-          }
-        }
-      }
-    }
+    // (connectedToPedalboard is updated from the UI thread inside step())
 
     float returnScale = connectedToPedalboard ? 1.0f : 10.0f;
     float sendScale = connectedToPedalboard ? 1.0f : 0.09f;
@@ -3773,6 +3757,7 @@ struct WorkshopSystemWidget : ModuleWidget {
     if (m && APP && APP->scene && APP->scene->rack) {
       m->isOsc1SelfPatched = false;
       m->isOsc2SelfPatched = false;
+      m->connectedToPedalboard = false;
 
       // Detect self-patch cables for VCO feedback (zero-latency feedback path)
       std::vector<app::CableWidget *> completeCables =
@@ -3788,6 +3773,14 @@ struct WorkshopSystemWidget : ModuleWidget {
             if (cw->inputPort->portId == WorkshopSystem::OSC2_FM_IN &&
                 cw->outputPort->portId == WorkshopSystem::OSC2_SIN_OUT) {
               m->isOsc2SelfPatched = true;
+            }
+          }
+
+          // Check if connected to Pedalboard module
+          if (cw->inputPort->module == module || cw->outputPort->module == module) {
+            engine::Module* otherModule = (cw->inputPort->module == module) ? cw->outputPort->module : cw->inputPort->module;
+            if (otherModule && otherModule->model && otherModule->model->slug == "Pedalboard") {
+              m->connectedToPedalboard = true;
             }
           }
         }
