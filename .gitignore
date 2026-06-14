@@ -4,6 +4,7 @@ dist/
 res/cards/
 res/web/
 res/backyard_rain/
+res/compulidean/
 res/wav/
 res/vcv_bridge.js
 plugin.dylib
