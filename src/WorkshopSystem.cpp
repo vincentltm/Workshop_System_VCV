@@ -32,6 +32,9 @@
 #include <app/MidiDisplay.hpp>
 #include <app/AudioDisplay.hpp>
 #include <osdialog.h>
+#include "lzstring.hpp"
+#include <unordered_set>
+#include <unordered_map>
 
 // Monome grid translation helpers
 void translate_midi_to_monome_grid(const uint8_t* msg_bytes, size_t msg_size);
@@ -1021,6 +1024,10 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
   int get_active_card_idx() const override { return activeCardIdx; }
   std::string get_active_card_id() const override { return card_globals.active_card_id_str; }
   int get_utility_index(int slot) const override { return utility_indices[slot & 1]; }
+  void set_utility_index(int slot, int index) override {
+    utility_indices[slot & 1] = index;
+    change_card(activeCardIdx); // Reload card to engage the new utility
+  }
   void set_pending_page_direction(int dir) override { pending_page_direction = dir; }
 
   void run_integration_tests() {
@@ -2916,9 +2923,466 @@ struct WorkshopAudioOutputPort : PJ301MPort {
 
 // --- Custom widgets and slots are loaded from shared/ComputerWidgets.hpp ---
 
-// ============================================================
-// MODULE WIDGET
-// ============================================================
+static NVGcolor parseHexColor(const std::string& hexStr) {
+  if (hexStr.empty() || hexStr[0] != '#') {
+    return nvgRGB(0xe0, 0x20, 0x20); // default red
+  }
+  unsigned int r = 0, g = 0, b = 0;
+  if (std::sscanf(hexStr.c_str(), "#%02x%02x%02x", &r, &g, &b) == 3) {
+    return nvgRGB(r, g, b);
+  }
+  return nvgRGB(0xe0, 0x20, 0x20);
+}
+
+static std::string nvgColorToHex(NVGcolor col) {
+  int r = std::max(0, std::min(255, (int)(col.r * 255.0f)));
+  int g = std::max(0, std::min(255, (int)(col.g * 255.0f)));
+  int b = std::max(0, std::min(255, (int)(col.b * 255.0f)));
+  char hex[8];
+  std::snprintf(hex, sizeof(hex), "#%02x%02x%02x", r, g, b);
+  return std::string(hex);
+}
+
+// Mapping helpers for PatchNotes serialization/deserialization
+static int cpp_to_js_utility_index(int cpp_idx) {
+  static const int cpp_to_js[24] = {
+    3,  // 0: Attenuverter -> attenuvert (3)
+    18, // 1: Bernoulli Gate -> bernoulli (18)
+    2,  // 2: Bitcrusher -> bitcrush (2)
+    7,  // 3: Chords -> chords (7)
+    13, // 4: Chorus -> chorus (13)
+    4,  // 5: Clock Divider -> clockdiv (4)
+    10, // 6: Cross Switch -> cross (10)
+    11, // 7: CV Mixer -> cvmix (11)
+    0,  // 8: Delay -> delay (0)
+    1,  // 9: Euclidean Rhythms -> euclidean (1)
+    22, // 10: Glitch -> glitch (22)
+    9,  // 11: Karplus-Strong -> karplusstrong (9)
+    15, // 12: Low Pass Gate -> lpg (15)
+    6,  // 13: Max/Rectify -> maxrect (6)
+    17, // 14: Quantiser -> quantiser (17)
+    16, // 15: Sample & Hold -> sandh (16)
+    5,  // 16: Slopes Plus -> slopesplus (5)
+    20, // 17: Slow LFO -> slowlfo (20)
+    19, // 18: Super Saw -> supersaw (19)
+    21, // 19: Turing 185 -> turing185 (21)
+    23, // 20: VCA -> vca (23)
+    12, // 21: VCO -> vco (12)
+    14, // 22: Wavefolder -> wavefolder (14)
+    8   // 23: Window Comparator -> windowcomp (8)
+  };
+  if (cpp_idx >= 0 && cpp_idx < 24) {
+    return cpp_to_js[cpp_idx];
+  }
+  return 0;
+}
+
+static int js_to_cpp_utility_index(int js_idx) {
+  static const int js_to_cpp[25] = {
+    8,  // 0: delay -> Delay (8)
+    9,  // 1: euclidean -> Euclidean Rhythms (9)
+    2,  // 2: bitcrush -> Bitcrusher (2)
+    0,  // 3: attenuvert -> Attenuverter (0)
+    5,  // 4: clockdiv -> Clock Divider (5)
+    16, // 5: slopesplus -> Slopes Plus (16)
+    13, // 6: maxrect -> Max/Rectify (13)
+    3,  // 7: chords -> Chords (3)
+    23, // 8: windowcomp -> Window Comparator (8)
+    11, // 9: karplusstrong -> Karplus-Strong (11)
+    6,  // 10: cross -> Cross Switch (6)
+    7,  // 11: cvmix -> CV Mixer (7)
+    21, // 12: vco -> VCO (21)
+    4,  // 13: chorus -> Chorus (4)
+    22, // 14: wavefolder -> Wavefolder (22)
+    12, // 15: lpg -> Low Pass Gate (12)
+    15, // 16: sandh -> Sample & Hold (15)
+    14, // 17: quantiser -> Quantiser (14)
+    1,  // 18: bernoulli -> Bernoulli Gate (1)
+    18, // 19: supersaw -> Super Saw (18)
+    17, // 20: slowlfo -> Slow LFO (17)
+    19, // 21: turing185 -> Turing 185 (19)
+    10, // 22: glitch -> Glitch (10)
+    20, // 23: vca -> VCA (20)
+    0   // 24: looper -> Attenuverter (0)
+  };
+  if (js_idx >= 0 && js_idx < 25) {
+    return js_to_cpp[js_idx];
+  }
+  return 0;
+}
+
+static int getParamIdFromShort(const std::string& s) {
+  if (s == "KX") return WorkshopSystem::COMPUTER_X_PARAM;
+  if (s == "KC") return WorkshopSystem::COMPUTER_MAIN_PARAM;
+  if (s == "KY") return WorkshopSystem::COMPUTER_Y_PARAM;
+  if (s == "KF1") return WorkshopSystem::OSC1_FINE_PARAM;
+  if (s == "KO1") return WorkshopSystem::OSC1_FREQ_PARAM;
+  if (s == "KFM1") return WorkshopSystem::OSC1_FM_PARAM;
+  if (s == "KF2") return WorkshopSystem::OSC2_FINE_PARAM;
+  if (s == "KO2") return WorkshopSystem::OSC2_FREQ_PARAM;
+  if (s == "KFM2") return WorkshopSystem::OSC2_FM_PARAM;
+  if (s == "KMS1") return WorkshopSystem::SLOPES1_RATE_PARAM;
+  if (s == "KMS2") return WorkshopSystem::SLOPES2_RATE_PARAM;
+  if (s == "KFF1") return WorkshopSystem::FILTER1_FM_PARAM;
+  if (s == "KLF1") return WorkshopSystem::FILTER1_CUTOFF_PARAM;
+  if (s == "KFR1") return WorkshopSystem::FILTER1_RES_PARAM;
+  if (s == "KFF2") return WorkshopSystem::FILTER2_FM_PARAM;
+  if (s == "KLF2") return WorkshopSystem::FILTER2_CUTOFF_PARAM;
+  if (s == "KFR2") return WorkshopSystem::FILTER2_RES_PARAM;
+  if (s == "KMA") return WorkshopSystem::AMP_GAIN_PARAM;
+  if (s == "KVB") return WorkshopSystem::VOLT_BLEND_PARAM;
+  if (s == "KSF") return WorkshopSystem::STOMP_FEEDBACK_PARAM;
+  if (s == "KSB") return WorkshopSystem::STOMP_BLEND_PARAM;
+  if (s == "KM1") return WorkshopSystem::MIX_CH1_PARAM;
+  if (s == "KM2") return WorkshopSystem::MIX_CH2_PARAM;
+  if (s == "KM3") return WorkshopSystem::MIX_CH3_PARAM;
+  if (s == "KM4") return WorkshopSystem::MIX_CH4_PARAM;
+  if (s == "KMP1") return WorkshopSystem::MIX_PAN1_PARAM;
+  if (s == "KMP2") return WorkshopSystem::MIX_PAN2_PARAM;
+  if (s == "KVM") return WorkshopSystem::MIX_MAIN_PARAM;
+
+  if (s == "SC") return WorkshopSystem::COMPUTER_SWITCH_PARAM;
+  if (s == "SA") return WorkshopSystem::AMP_SWITCH_PARAM;
+  if (s == "SF1h") return WorkshopSystem::FILTER1_SWITCH_PARAM;
+  if (s == "SF2h") return WorkshopSystem::FILTER2_SWITCH_PARAM;
+  if (s == "SS1s") return WorkshopSystem::SLOPES1_SHAPE_PARAM;
+  if (s == "SS2s") return WorkshopSystem::SLOPES2_SHAPE_PARAM;
+  if (s == "SL1l") return WorkshopSystem::SLOPES1_MODE_PARAM;
+  if (s == "SL2l") return WorkshopSystem::SLOPES2_MODE_PARAM;
+
+  if (s == "B1") return WorkshopSystem::VOLT_BTN1_PARAM;
+  if (s == "B2") return WorkshopSystem::VOLT_BTN2_PARAM;
+  if (s == "B3") return WorkshopSystem::VOLT_BTN3_PARAM;
+  if (s == "B4") return WorkshopSystem::VOLT_BTN4_PARAM;
+
+  return -1;
+}
+
+static std::string getShortFromParamId(int paramId) {
+  switch (paramId) {
+    case WorkshopSystem::COMPUTER_X_PARAM: return "KX";
+    case WorkshopSystem::COMPUTER_MAIN_PARAM: return "KC";
+    case WorkshopSystem::COMPUTER_Y_PARAM: return "KY";
+    case WorkshopSystem::OSC1_FINE_PARAM: return "KF1";
+    case WorkshopSystem::OSC1_FREQ_PARAM: return "KO1";
+    case WorkshopSystem::OSC1_FM_PARAM: return "KFM1";
+    case WorkshopSystem::OSC2_FINE_PARAM: return "KF2";
+    case WorkshopSystem::OSC2_FREQ_PARAM: return "KO2";
+    case WorkshopSystem::OSC2_FM_PARAM: return "KFM2";
+    case WorkshopSystem::SLOPES1_RATE_PARAM: return "KMS1";
+    case WorkshopSystem::SLOPES2_RATE_PARAM: return "KMS2";
+    case WorkshopSystem::FILTER1_FM_PARAM: return "KFF1";
+    case WorkshopSystem::FILTER1_CUTOFF_PARAM: return "KLF1";
+    case WorkshopSystem::FILTER1_RES_PARAM: return "KFR1";
+    case WorkshopSystem::FILTER2_FM_PARAM: return "KFF2";
+    case WorkshopSystem::FILTER2_CUTOFF_PARAM: return "KLF2";
+    case WorkshopSystem::FILTER2_RES_PARAM: return "KFR2";
+    case WorkshopSystem::AMP_GAIN_PARAM: return "KMA";
+    case WorkshopSystem::VOLT_BLEND_PARAM: return "KVB";
+    case WorkshopSystem::STOMP_FEEDBACK_PARAM: return "KSF";
+    case WorkshopSystem::STOMP_BLEND_PARAM: return "KSB";
+    case WorkshopSystem::MIX_CH1_PARAM: return "KM1";
+    case WorkshopSystem::MIX_CH2_PARAM: return "KM2";
+    case WorkshopSystem::MIX_CH3_PARAM: return "KM3";
+    case WorkshopSystem::MIX_CH4_PARAM: return "KM4";
+    case WorkshopSystem::MIX_PAN1_PARAM: return "KMP1";
+    case WorkshopSystem::MIX_PAN2_PARAM: return "KMP2";
+    case WorkshopSystem::MIX_MAIN_PARAM: return "KVM";
+
+    case WorkshopSystem::COMPUTER_SWITCH_PARAM: return "SC";
+    case WorkshopSystem::AMP_SWITCH_PARAM: return "SA";
+    case WorkshopSystem::FILTER1_SWITCH_PARAM: return "SF1h";
+    case WorkshopSystem::FILTER2_SWITCH_PARAM: return "SF2h";
+    case WorkshopSystem::SLOPES1_SHAPE_PARAM: return "SS1s";
+    case WorkshopSystem::SLOPES2_SHAPE_PARAM: return "SS2s";
+    case WorkshopSystem::SLOPES1_MODE_PARAM: return "SL1l";
+    case WorkshopSystem::SLOPES2_MODE_PARAM: return "SL2l";
+
+    case WorkshopSystem::VOLT_BTN1_PARAM: return "B1";
+    case WorkshopSystem::VOLT_BTN2_PARAM: return "B2";
+    case WorkshopSystem::VOLT_BTN3_PARAM: return "B3";
+    case WorkshopSystem::VOLT_BTN4_PARAM: return "B4";
+  }
+  return "";
+}
+
+static bool getPortFromShort(const std::string& s, bool& isInput, int& portId) {
+  isInput = true;
+  if (s == "J1i") { portId = WorkshopSystem::COMPUTER_AUDIO1_IN; return true; }
+  if (s == "J2i") { portId = WorkshopSystem::COMPUTER_AUDIO2_IN; return true; }
+  if (s == "JC1i") { portId = WorkshopSystem::COMPUTER_CV1_IN; return true; }
+  if (s == "JC2i") { portId = WorkshopSystem::COMPUTER_CV2_IN; return true; }
+  if (s == "JP1i") { portId = WorkshopSystem::COMPUTER_PULSE1_IN; return true; }
+  if (s == "JP2i") { portId = WorkshopSystem::COMPUTER_PULSE2_IN; return true; }
+  if (s == "JOP1i") { portId = WorkshopSystem::OSC1_PITCH_IN; return true; }
+  if (s == "JOP2i") { portId = WorkshopSystem::OSC2_PITCH_IN; return true; }
+  if (s == "JOFM1i") { portId = WorkshopSystem::OSC1_FM_IN; return true; }
+  if (s == "JOFM2i") { portId = WorkshopSystem::OSC2_FM_IN; return true; }
+  if (s == "JSI") { portId = WorkshopSystem::STEREO_IN_JACK; return true; }
+  if (s == "JR1i") { portId = WorkshopSystem::RING_IN1; return true; }
+  if (s == "JR2i") { portId = WorkshopSystem::RING_IN2; return true; }
+  if (s == "JSin") { portId = WorkshopSystem::STOMP_IN; return true; }
+  if (s == "JSR") { portId = WorkshopSystem::STOMP_RETURN; return true; }
+  if (s == "JAI") { portId = WorkshopSystem::AMP_IN; return true; }
+  if (s == "JF1i") { portId = WorkshopSystem::FILTER1_IN; return true; }
+  if (s == "JF2i") { portId = WorkshopSystem::FILTER2_IN; return true; }
+  if (s == "JFFM1i") { portId = WorkshopSystem::FILTER1_FM_IN; return true; }
+  if (s == "JFFM2i") { portId = WorkshopSystem::FILTER2_FM_IN; return true; }
+  if (s == "JSL1i") { portId = WorkshopSystem::SLOPES1_IN; return true; }
+  if (s == "JSCV1i") { portId = WorkshopSystem::SLOPES1_CV_IN; return true; }
+  if (s == "JSL2i") { portId = WorkshopSystem::SLOPES2_IN; return true; }
+  if (s == "JSCV2i") { portId = WorkshopSystem::SLOPES2_CV_IN; return true; }
+  if (s == "JM1i") { portId = WorkshopSystem::MIXER1_IN; return true; }
+  if (s == "JM2i") { portId = WorkshopSystem::MIXER2_IN; return true; }
+  if (s == "JM3i") { portId = WorkshopSystem::MIXER3_IN; return true; }
+  if (s == "JM4i") { portId = WorkshopSystem::MIXER4_IN; return true; }
+
+  isInput = false;
+  if (s == "J1o") { portId = WorkshopSystem::COMPUTER_AUDIO1_OUT; return true; }
+  if (s == "JC1o") { portId = WorkshopSystem::COMPUTER_CV1_OUT; return true; }
+  if (s == "JP1o") { portId = WorkshopSystem::COMPUTER_PULSE1_OUT; return true; }
+  if (s == "J2o") { portId = WorkshopSystem::COMPUTER_AUDIO2_OUT; return true; }
+  if (s == "JC2o") { portId = WorkshopSystem::COMPUTER_CV2_OUT; return true; }
+  if (s == "JP2o") { portId = WorkshopSystem::COMPUTER_PULSE2_OUT; return true; }
+  if (s == "JOS1q") { portId = WorkshopSystem::OSC1_SQR_OUT; return true; }
+  if (s == "JOS2q") { portId = WorkshopSystem::OSC2_SQR_OUT; return true; }
+  if (s == "JOS1s") { portId = WorkshopSystem::OSC1_SIN_OUT; return true; }
+  if (s == "JOS2s") { portId = WorkshopSystem::OSC2_SIN_OUT; return true; }
+  if (s == "JRO") { portId = WorkshopSystem::RING_OUT; return true; }
+  if (s == "JSout") { portId = WorkshopSystem::STOMP_OUT; return true; }
+  if (s == "JSS") { portId = WorkshopSystem::STOMP_SEND; return true; }
+  if (s == "JAO") { portId = WorkshopSystem::AMP_OUT; return true; }
+  if (s == "JV1o") { portId = WorkshopSystem::VOLT1_OUT; return true; }
+  if (s == "JV2o") { portId = WorkshopSystem::VOLT2_OUT; return true; }
+  if (s == "JV3o") { portId = WorkshopSystem::VOLT3_OUT; return true; }
+  if (s == "JV4o") { portId = WorkshopSystem::VOLT4_OUT; return true; }
+  if (s == "JF1ho") { portId = WorkshopSystem::FILTER1_HP_OUT; return true; }
+  if (s == "JF2ho") { portId = WorkshopSystem::FILTER2_HP_OUT; return true; }
+  if (s == "JF1lo") { portId = WorkshopSystem::FILTER1_LP_OUT; return true; }
+  if (s == "JF2lo") { portId = WorkshopSystem::FILTER2_LP_OUT; return true; }
+  if (s == "JSL1o") { portId = WorkshopSystem::SLOPES1_OUT; return true; }
+  if (s == "JSL2o") { portId = WorkshopSystem::SLOPES2_OUT; return true; }
+  if (s == "JMLo") { portId = WorkshopSystem::MIXER_L_OUT; return true; }
+  if (s == "JMRO") { portId = WorkshopSystem::MIXER_R_OUT; return true; }
+  if (s == "JPH1o") { portId = WorkshopSystem::PHONES1_OUT; return true; }
+  if (s == "JPH2o") { portId = WorkshopSystem::PHONES2_OUT; return true; }
+  if (s == "JSI1o") { portId = WorkshopSystem::STEREO_L_OUT; return true; }
+  if (s == "JSI2o") { portId = WorkshopSystem::STEREO_R_OUT; return true; }
+
+  return false;
+}
+
+static std::string getShortFromPort(bool isInput, int portId) {
+  if (isInput) {
+    switch (portId) {
+      case WorkshopSystem::COMPUTER_AUDIO1_IN: return "J1i";
+      case WorkshopSystem::COMPUTER_AUDIO2_IN: return "J2i";
+      case WorkshopSystem::COMPUTER_CV1_IN: return "JC1i";
+      case WorkshopSystem::COMPUTER_CV2_IN: return "JC2i";
+      case WorkshopSystem::COMPUTER_PULSE1_IN: return "JP1i";
+      case WorkshopSystem::COMPUTER_PULSE2_IN: return "JP2i";
+      case WorkshopSystem::OSC1_PITCH_IN: return "JOP1i";
+      case WorkshopSystem::OSC2_PITCH_IN: return "JOP2i";
+      case WorkshopSystem::OSC1_FM_IN: return "JOFM1i";
+      case WorkshopSystem::OSC2_FM_IN: return "JOFM2i";
+      case WorkshopSystem::STEREO_IN_JACK: return "JSI";
+      case WorkshopSystem::RING_IN1: return "JR1i";
+      case WorkshopSystem::RING_IN2: return "JR2i";
+      case WorkshopSystem::STOMP_IN: return "JSin";
+      case WorkshopSystem::STOMP_RETURN: return "JSR";
+      case WorkshopSystem::AMP_IN: return "JAI";
+      case WorkshopSystem::FILTER1_IN: return "JF1i";
+      case WorkshopSystem::FILTER2_IN: return "JF2i";
+      case WorkshopSystem::FILTER1_FM_IN: return "JFFM1i";
+      case WorkshopSystem::FILTER2_FM_IN: return "JFFM2i";
+      case WorkshopSystem::SLOPES1_IN: return "JSL1i";
+      case WorkshopSystem::SLOPES1_CV_IN: return "JSCV1i";
+      case WorkshopSystem::SLOPES2_IN: return "JSL2i";
+      case WorkshopSystem::SLOPES2_CV_IN: return "JSCV2i";
+      case WorkshopSystem::MIXER1_IN: return "JM1i";
+      case WorkshopSystem::MIXER2_IN: return "JM2i";
+      case WorkshopSystem::MIXER3_IN: return "JM3i";
+      case WorkshopSystem::MIXER4_IN: return "JM4i";
+    }
+  } else {
+    switch (portId) {
+      case WorkshopSystem::COMPUTER_AUDIO1_OUT: return "J1o";
+      case WorkshopSystem::COMPUTER_CV1_OUT: return "JC1o";
+      case WorkshopSystem::COMPUTER_PULSE1_OUT: return "JP1o";
+      case WorkshopSystem::COMPUTER_AUDIO2_OUT: return "J2o";
+      case WorkshopSystem::COMPUTER_CV2_OUT: return "JC2o";
+      case WorkshopSystem::COMPUTER_PULSE2_OUT: return "JP2o";
+      case WorkshopSystem::OSC1_SQR_OUT: return "JOS1q";
+      case WorkshopSystem::OSC2_SQR_OUT: return "JOS2q";
+      case WorkshopSystem::OSC1_SIN_OUT: return "JOS1s";
+      case WorkshopSystem::OSC2_SIN_OUT: return "JOS2s";
+      case WorkshopSystem::RING_OUT: return "JRO";
+      case WorkshopSystem::STOMP_OUT: return "JSout";
+      case WorkshopSystem::STOMP_SEND: return "JSS";
+      case WorkshopSystem::AMP_OUT: return "JAO";
+      case WorkshopSystem::VOLT1_OUT: return "JV1o";
+      case WorkshopSystem::VOLT2_OUT: return "JV2o";
+      case WorkshopSystem::VOLT3_OUT: return "JV3o";
+      case WorkshopSystem::VOLT4_OUT: return "JV4o";
+      case WorkshopSystem::FILTER1_HP_OUT: return "JF1ho";
+      case WorkshopSystem::FILTER2_HP_OUT: return "JF2ho";
+      case WorkshopSystem::FILTER1_LP_OUT: return "JF1lo";
+      case WorkshopSystem::FILTER2_LP_OUT: return "JF2lo";
+      case WorkshopSystem::SLOPES1_OUT: return "JSL1o";
+      case WorkshopSystem::SLOPES2_OUT: return "JSL2o";
+      case WorkshopSystem::MIXER_L_OUT: return "JMLo";
+      case WorkshopSystem::MIXER_R_OUT: return "JMRO";
+      case WorkshopSystem::PHONES1_OUT: return "JPH1o";
+      case WorkshopSystem::PHONES2_OUT: return "JPH2o";
+      case WorkshopSystem::STEREO_L_OUT: return "JSI1o";
+      case WorkshopSystem::STEREO_R_OUT: return "JSI2o";
+    }
+  }
+  return "";
+}
+
+static int getBlockIdxByPort(int portId, bool isInput) {
+  if (isInput) {
+    switch (portId) {
+      case WorkshopSystem::COMPUTER_AUDIO1_IN:
+      case WorkshopSystem::COMPUTER_AUDIO2_IN:
+      case WorkshopSystem::COMPUTER_CV1_IN:
+      case WorkshopSystem::COMPUTER_CV2_IN:
+      case WorkshopSystem::COMPUTER_PULSE1_IN:
+      case WorkshopSystem::COMPUTER_PULSE2_IN: return 0;
+
+      case WorkshopSystem::OSC1_PITCH_IN:
+      case WorkshopSystem::OSC1_FM_IN: return 1;
+
+      case WorkshopSystem::OSC2_PITCH_IN:
+      case WorkshopSystem::OSC2_FM_IN: return 2;
+
+      case WorkshopSystem::RING_IN1:
+      case WorkshopSystem::RING_IN2: return 4;
+
+      case WorkshopSystem::STOMP_IN:
+      case WorkshopSystem::STOMP_RETURN: return 5;
+
+      case WorkshopSystem::AMP_IN: return 6;
+
+      case WorkshopSystem::FILTER1_IN:
+      case WorkshopSystem::FILTER1_FM_IN: return 8;
+
+      case WorkshopSystem::FILTER2_IN:
+      case WorkshopSystem::FILTER2_FM_IN: return 9;
+
+      case WorkshopSystem::SLOPES1_IN:
+      case WorkshopSystem::SLOPES1_CV_IN: return 10;
+
+      case WorkshopSystem::SLOPES2_IN:
+      case WorkshopSystem::SLOPES2_CV_IN: return 11;
+
+      case WorkshopSystem::MIXER1_IN:
+      case WorkshopSystem::MIXER2_IN:
+      case WorkshopSystem::MIXER3_IN:
+      case WorkshopSystem::MIXER4_IN: return 12;
+    }
+  } else {
+    switch (portId) {
+      case WorkshopSystem::COMPUTER_AUDIO1_OUT:
+      case WorkshopSystem::COMPUTER_AUDIO2_OUT:
+      case WorkshopSystem::COMPUTER_CV1_OUT:
+      case WorkshopSystem::COMPUTER_CV2_OUT:
+      case WorkshopSystem::COMPUTER_PULSE1_OUT:
+      case WorkshopSystem::COMPUTER_PULSE2_OUT: return 0;
+
+      case WorkshopSystem::OSC1_SQR_OUT:
+      case WorkshopSystem::OSC1_SIN_OUT: return 1;
+
+      case WorkshopSystem::OSC2_SQR_OUT:
+      case WorkshopSystem::OSC2_SIN_OUT: return 2;
+
+      case WorkshopSystem::STEREO_L_OUT:
+      case WorkshopSystem::STEREO_R_OUT: return 3;
+
+      case WorkshopSystem::RING_OUT: return 4;
+
+      case WorkshopSystem::STOMP_OUT:
+      case WorkshopSystem::STOMP_SEND: return 5;
+
+      case WorkshopSystem::AMP_OUT: return 6;
+
+      case WorkshopSystem::VOLT1_OUT:
+      case WorkshopSystem::VOLT2_OUT:
+      case WorkshopSystem::VOLT3_OUT:
+      case WorkshopSystem::VOLT4_OUT: return 7;
+
+      case WorkshopSystem::FILTER1_HP_OUT:
+      case WorkshopSystem::FILTER1_LP_OUT: return 8;
+
+      case WorkshopSystem::FILTER2_HP_OUT:
+      case WorkshopSystem::FILTER2_LP_OUT: return 9;
+
+      case WorkshopSystem::SLOPES1_OUT: return 10;
+
+      case WorkshopSystem::SLOPES2_OUT: return 11;
+
+      case WorkshopSystem::MIXER_L_OUT:
+      case WorkshopSystem::MIXER_R_OUT:
+      case WorkshopSystem::PHONES1_OUT:
+      case WorkshopSystem::PHONES2_OUT: return 12;
+    }
+  }
+  return -1;
+}
+
+static bool canReachMixer(int startNode, int targetNode, const std::unordered_map<int, std::vector<int>>& graph) {
+  std::vector<int> queue;
+  queue.push_back(startNode);
+  std::unordered_set<int> visited;
+  visited.insert(startNode);
+
+  size_t head = 0;
+  while (head < queue.size()) {
+    int node = queue[head++];
+    if (node == targetNode) return true;
+    auto it = graph.find(node);
+    if (it != graph.end()) {
+      for (int neighbor : it->second) {
+        if (visited.find(neighbor) == visited.end()) {
+          visited.insert(neighbor);
+          queue.push_back(neighbor);
+        }
+      }
+    }
+  }
+  return false;
+}
+
+static bool isValidPatch(const std::vector<std::pair<int, int>>& connections, int mixerIdx) {
+  std::unordered_map<int, std::vector<int>> graph;
+  std::unordered_set<int> modulesWithOutputs;
+
+  for (const auto& c : connections) {
+    int fromIdx = getBlockIdxByPort(c.first, false);
+    int toIdx = getBlockIdxByPort(c.second, true);
+    if (fromIdx != -1 && toIdx != -1) {
+      graph[fromIdx].push_back(toIdx);
+      modulesWithOutputs.insert(fromIdx);
+    }
+  }
+
+  for (int startModIdx : modulesWithOutputs) {
+    if (startModIdx == mixerIdx) continue;
+    if (!canReachMixer(startModIdx, mixerIdx, graph)) return false;
+  }
+
+  bool hasAudioSource = false;
+  static const std::unordered_set<int> AUDIO_SOURCES_IDX = {0, 1, 2, 3, 4, 5, 6, 10, 11};
+  for (int idx : modulesWithOutputs) {
+    if (AUDIO_SOURCES_IDX.find(idx) != AUDIO_SOURCES_IDX.end()) {
+      hasAudioSource = true;
+      break;
+    }
+  }
+
+  return hasAudioSource;
+}
 
 struct WorkshopSystemWidget : ModuleWidget {
   WorkshopSystemWidget(WorkshopSystem *module) {
@@ -3569,61 +4033,6 @@ struct WorkshopSystemWidget : ModuleWidget {
         }
       }
 
-      // Submenus for Left & Right utility pair channels
-      if (m->activeCardIdx >= 0 && m->activeCardIdx < (int)g_card_registry.size() && g_card_registry[m->activeCardIdx].id == "utility_pair") {
-        menu->addChild(new MenuSeparator());
-        menu->addChild(createMenuLabel("Utility Pair Selection"));
-
-        struct UtilitySubmenuItem : MenuItem {
-          WorkshopSystem* module;
-          int channel; // 0 = Left, 1 = Right
-
-          Menu* createChildMenu() override {
-            Menu* menu = new Menu();
-            static const std::string UTILITIES[24] = {
-                "Attenuverter", "Bernoulli Gate", "Bitcrusher", "Chords",
-                "Chorus", "Clock Divider", "Cross Switch", "CV Mixer",
-                "Delay", "Euclidean Rhythms", "Glitch", "Karplus-Strong",
-                "Low Pass Gate", "Max/Rectify", "Quantiser", "Sample & Hold",
-                "Slopes Plus", "Slow LFO", "Super Saw", "Turing 185",
-                "VCA", "VCO", "Wavefolder", "Window Comparator"
-            };
-
-            struct UtilItem : MenuItem {
-              WorkshopSystem* module;
-              int channel;
-              int index;
-              void onAction(const event::Action& e) override {
-                module->utility_indices[channel] = index;
-                module->change_card(module->activeCardIdx); // Reload card to engage the new utility
-              }
-            };
-
-            for (int i = 0; i < 24; i++) {
-              UtilItem* item = new UtilItem();
-              item->text = UTILITIES[i];
-              item->module = module;
-              item->channel = channel;
-              item->index = i;
-              item->rightText = (module->utility_indices[channel] == i) ? "✔" : "";
-              menu->addChild(item);
-            }
-            return menu;
-          }
-        };
-
-        UtilitySubmenuItem* leftItem = new UtilitySubmenuItem();
-        leftItem->text = "Left Utility Channel";
-        leftItem->module = m;
-        leftItem->channel = 0;
-        menu->addChild(leftItem);
-
-        UtilitySubmenuItem* rightItem = new UtilitySubmenuItem();
-        rightItem->text = "Right Utility Channel";
-        rightItem->module = m;
-        rightItem->channel = 1;
-        menu->addChild(rightItem);
-      }
 
       // Flash Memory actions
       menu->addChild(new MenuSeparator());
@@ -3680,6 +4089,751 @@ struct WorkshopSystemWidget : ModuleWidget {
       runTestsItem->text = "Run Card Integration Tests";
       runTestsItem->module = m;
       menu->addChild(runTestsItem);
+    }
+
+    struct PatchNotesSubmenuItem : MenuItem {
+      WorkshopSystemWidget* widget;
+      Menu* createChildMenu() override {
+        Menu* menu = new Menu();
+
+        struct CopyPatchNotesLinkItem : MenuItem {
+          WorkshopSystemWidget* widget;
+          void onAction(const event::Action& e) override {
+            widget->copyPatchNotesLink();
+          }
+        };
+        CopyPatchNotesLinkItem* copyItem = new CopyPatchNotesLinkItem();
+        copyItem->text = "Copy Link";
+        copyItem->widget = widget;
+        menu->addChild(copyItem);
+
+        struct PastePatchNotesLinkItem : MenuItem {
+          WorkshopSystemWidget* widget;
+          void onAction(const event::Action& e) override {
+            widget->pastePatchNotesLink();
+          }
+        };
+        PastePatchNotesLinkItem* pasteItem = new PastePatchNotesLinkItem();
+        pasteItem->text = "Paste Link";
+        pasteItem->widget = widget;
+        menu->addChild(pasteItem);
+
+        struct OpenInPatchNotesItem : MenuItem {
+          WorkshopSystemWidget* widget;
+          void onAction(const event::Action& e) override {
+            widget->openInPatchNotes();
+          }
+        };
+        OpenInPatchNotesItem* openItem = new OpenInPatchNotesItem();
+        openItem->text = "Open in Browser";
+        openItem->widget = widget;
+        menu->addChild(openItem);
+
+        struct RandomizePlausiblePatchItem : MenuItem {
+          WorkshopSystemWidget* widget;
+          void onAction(const event::Action& e) override {
+            widget->randomizePlausiblePatch();
+          }
+        };
+        RandomizePlausiblePatchItem* randItem = new RandomizePlausiblePatchItem();
+        randItem->text = "Randomize Plausible";
+        randItem->widget = widget;
+        menu->addChild(randItem);
+
+        return menu;
+      }
+    };
+
+    menu->addChild(new MenuSeparator());
+    PatchNotesSubmenuItem* pnMenu = new PatchNotesSubmenuItem();
+    pnMenu->text = "PatchNotes";
+    pnMenu->widget = this;
+    pnMenu->rightText = "➔";
+    menu->addChild(pnMenu);
+  }
+
+  void copyPatchNotesLink() {
+    WorkshopSystem *m = dynamic_cast<WorkshopSystem *>(module);
+    if (!m) return;
+
+    json_t *rootJ = json_object();
+
+    // cs: minComponents
+    json_t *csJ = json_object();
+    for (int paramId = 0; paramId < WorkshopSystem::NUM_PARAMS; ++paramId) {
+      float val = 0.0f;
+      bool isVoltBtn = (paramId >= WorkshopSystem::VOLT_BTN1_PARAM && paramId <= WorkshopSystem::VOLT_BTN4_PARAM);
+      if (isVoltBtn) {
+        val = m->voltBtnStates[paramId - WorkshopSystem::VOLT_BTN1_PARAM] ? 1.0f : 0.0f;
+      } else {
+        val = m->params[paramId].getValue();
+      }
+
+      // Invert switches for web app compatibility (Web: 0=UP, VCV: 0=DOWN)
+      bool isSwitch3 = (paramId == WorkshopSystem::COMPUTER_SWITCH_PARAM ||
+                        paramId == WorkshopSystem::SLOPES1_SHAPE_PARAM ||
+                        paramId == WorkshopSystem::SLOPES2_SHAPE_PARAM ||
+                        paramId == WorkshopSystem::SLOPES1_MODE_PARAM ||
+                        paramId == WorkshopSystem::SLOPES2_MODE_PARAM);
+      bool isSwitch2 = (paramId == WorkshopSystem::AMP_SWITCH_PARAM ||
+                        paramId == WorkshopSystem::FILTER1_SWITCH_PARAM ||
+                        paramId == WorkshopSystem::FILTER2_SWITCH_PARAM);
+      if (isSwitch3) {
+        val = 2.0f - val;
+      } else if (isSwitch2) {
+        val = 1.0f - val;
+      }
+
+      std::string shortId = getShortFromParamId(paramId);
+      if (!shortId.empty()) {
+        json_object_set_new(csJ, shortId.c_str(), json_integer(std::round(val * 1000.0f)));
+      }
+    }
+    json_object_set_new(rootJ, "cs", csJ);
+
+    // c: minCables
+    json_t *cablesJ = json_array();
+    if (APP && APP->scene && APP->scene->rack) {
+      std::vector<app::CableWidget *> completeCables = APP->scene->rack->getCompleteCables();
+      for (app::CableWidget *cw : completeCables) {
+        if (cw && cw->inputPort && cw->outputPort) {
+          if (cw->inputPort->module == module && cw->outputPort->module == module) {
+            std::string sShort = getShortFromPort(false, cw->outputPort->portId);
+            std::string eShort = getShortFromPort(true, cw->inputPort->portId);
+            if (!sShort.empty() && !eShort.empty()) {
+              json_t *cItemJ = json_object();
+              json_object_set_new(cItemJ, "s", json_string(sShort.c_str()));
+              json_object_set_new(cItemJ, "e", json_string(eShort.c_str()));
+              json_object_set_new(cItemJ, "c", json_string(nvgColorToHex(cw->color).c_str()));
+              json_object_set_new(cItemJ, "d", json_integer(0));
+              json_array_append_new(cablesJ, cItemJ);
+            }
+          }
+        }
+      }
+    }
+    json_object_set_new(rootJ, "c", cablesJ);
+
+    std::string cardId = m->get_active_card_id();
+    if (cardId.empty()) cardId = "none";
+    json_object_set_new(rootJ, "aci", json_string(cardId.c_str()));
+
+    if (cardId == "utility_pair") {
+      json_t *upsJ = json_array();
+      json_array_append_new(upsJ, json_integer(cpp_to_js_utility_index(m->utility_indices[0])));
+      json_array_append_new(upsJ, json_integer(cpp_to_js_utility_index(m->utility_indices[1])));
+      json_object_set_new(rootJ, "ups", upsJ);
+    }
+
+    char *jsonStr = json_dumps(rootJ, JSON_COMPACT);
+    if (jsonStr) {
+      std::string compressed = lzstring::compressToEncodedURIComponent(jsonStr);
+      free(jsonStr);
+
+      std::string url = "https://vincentmaurer.de/patch-notes/#p=" + compressed;
+
+      if (APP && APP->window && APP->window->win) {
+        glfwSetClipboardString(APP->window->win, url.c_str());
+      }
+    }
+    json_decref(rootJ);
+  }
+
+  void openInPatchNotes() {
+    WorkshopSystem *m = dynamic_cast<WorkshopSystem *>(module);
+    if (!m) return;
+
+    json_t *rootJ = json_object();
+
+    // cs: minComponents
+    json_t *csJ = json_object();
+    for (int paramId = 0; paramId < WorkshopSystem::NUM_PARAMS; ++paramId) {
+      float val = 0.0f;
+      bool isVoltBtn = (paramId >= WorkshopSystem::VOLT_BTN1_PARAM && paramId <= WorkshopSystem::VOLT_BTN4_PARAM);
+      if (isVoltBtn) {
+        val = m->voltBtnStates[paramId - WorkshopSystem::VOLT_BTN1_PARAM] ? 1.0f : 0.0f;
+      } else {
+        val = m->params[paramId].getValue();
+      }
+
+      bool isSwitch3 = (paramId == WorkshopSystem::COMPUTER_SWITCH_PARAM ||
+                        paramId == WorkshopSystem::SLOPES1_SHAPE_PARAM ||
+                        paramId == WorkshopSystem::SLOPES2_SHAPE_PARAM ||
+                        paramId == WorkshopSystem::SLOPES1_MODE_PARAM ||
+                        paramId == WorkshopSystem::SLOPES2_MODE_PARAM);
+      bool isSwitch2 = (paramId == WorkshopSystem::AMP_SWITCH_PARAM ||
+                        paramId == WorkshopSystem::FILTER1_SWITCH_PARAM ||
+                        paramId == WorkshopSystem::FILTER2_SWITCH_PARAM);
+      if (isSwitch3) {
+        val = 2.0f - val;
+      } else if (isSwitch2) {
+        val = 1.0f - val;
+      }
+
+      std::string shortId = getShortFromParamId(paramId);
+      if (!shortId.empty()) {
+        json_object_set_new(csJ, shortId.c_str(), json_integer(std::round(val * 1000.0f)));
+      }
+    }
+    json_object_set_new(rootJ, "cs", csJ);
+
+    // c: minCables
+    json_t *cablesJ = json_array();
+    if (APP && APP->scene && APP->scene->rack) {
+      std::vector<app::CableWidget *> completeCables = APP->scene->rack->getCompleteCables();
+      for (app::CableWidget *cw : completeCables) {
+        if (cw && cw->inputPort && cw->outputPort) {
+          if (cw->inputPort->module == module && cw->outputPort->module == module) {
+            std::string sShort = getShortFromPort(false, cw->outputPort->portId);
+            std::string eShort = getShortFromPort(true, cw->inputPort->portId);
+            if (!sShort.empty() && !eShort.empty()) {
+              json_t *cItemJ = json_object();
+              json_object_set_new(cItemJ, "s", json_string(sShort.c_str()));
+              json_object_set_new(cItemJ, "e", json_string(eShort.c_str()));
+              json_object_set_new(cItemJ, "c", json_string(nvgColorToHex(cw->color).c_str()));
+              json_object_set_new(cItemJ, "d", json_integer(0));
+              json_array_append_new(cablesJ, cItemJ);
+            }
+          }
+        }
+      }
+    }
+    json_object_set_new(rootJ, "c", cablesJ);
+
+    std::string cardId = m->get_active_card_id();
+    if (cardId.empty()) cardId = "none";
+    json_object_set_new(rootJ, "aci", json_string(cardId.c_str()));
+
+    if (cardId == "utility_pair") {
+      json_t *upsJ = json_array();
+      json_array_append_new(upsJ, json_integer(cpp_to_js_utility_index(m->utility_indices[0])));
+      json_array_append_new(upsJ, json_integer(cpp_to_js_utility_index(m->utility_indices[1])));
+      json_object_set_new(rootJ, "ups", upsJ);
+    }
+
+    char *jsonStr = json_dumps(rootJ, JSON_COMPACT);
+    if (jsonStr) {
+      std::string compressed = lzstring::compressToEncodedURIComponent(jsonStr);
+      free(jsonStr);
+
+      std::string url = "https://vincentmaurer.de/patch-notes/#p=" + compressed;
+
+      if (APP && APP->window && APP->window->win) {
+        glfwSetClipboardString(APP->window->win, url.c_str());
+      }
+
+#if defined(_WIN32)
+      std::string cmd = "start " + url;
+#elif defined(__APPLE__)
+      std::string cmd = "open \"" + url + "\"";
+#else
+      std::string cmd = "xdg-open \"" + url + "\"";
+#endif
+      int ret = std::system(cmd.c_str());
+      (void)ret;
+    }
+    json_decref(rootJ);
+  }
+
+  void pastePatchNotesLink() {
+    WorkshopSystem *m = dynamic_cast<WorkshopSystem *>(module);
+    if (!m) return;
+
+    if (!APP || !APP->window || !APP->window->win) return;
+
+    const char* clip = glfwGetClipboardString(APP->window->win);
+    if (!clip) return;
+
+    std::string input(clip);
+    std::string compressed = "";
+    size_t pos = input.find("#p=");
+    if (pos != std::string::npos) {
+      compressed = input.substr(pos + 3);
+    } else {
+      pos = input.find("?p=");
+      if (pos != std::string::npos) {
+        compressed = input.substr(pos + 3);
+      } else {
+        pos = input.find("p=");
+        if (pos != std::string::npos && (pos == 0 || input[pos - 1] == '&' || input[pos - 1] == '?' || input[pos - 1] == '#')) {
+          compressed = input.substr(pos + 2);
+        } else {
+          if (input.find("http://") == 0 || input.find("https://") == 0) {
+            return;
+          }
+          compressed = input;
+        }
+      }
+    }
+
+    if (compressed.empty()) return;
+
+    std::string decompressed = lzstring::decompressFromEncodedURIComponent(compressed);
+    if (decompressed.empty()) return;
+
+    json_error_t error;
+    json_t *rootJ = json_loads(decompressed.c_str(), 0, &error);
+    if (!rootJ) return;
+
+    int target_card_idx = -1;
+    json_t *aciJ = json_object_get(rootJ, "aci");
+    if (aciJ && json_is_string(aciJ)) {
+      std::string card_id = json_string_value(aciJ);
+      for (size_t i = 0; i < g_card_registry.size(); i++) {
+        if (g_card_registry[i].id == card_id) {
+          target_card_idx = (int)i;
+          break;
+        }
+      }
+    }
+    m->change_card(target_card_idx);
+
+    json_t *upsJ = json_object_get(rootJ, "ups");
+    if (upsJ && json_is_array(upsJ) && json_array_size(upsJ) >= 2) {
+      m->utility_indices[0] = js_to_cpp_utility_index(json_integer_value(json_array_get(upsJ, 0)));
+      m->utility_indices[1] = js_to_cpp_utility_index(json_integer_value(json_array_get(upsJ, 1)));
+      if (target_card_idx >= 0 && g_card_registry[target_card_idx].id == "utility_pair") {
+        m->change_card(target_card_idx);
+      }
+    }
+
+    // Reset all parameters to defaults first, so parameters not in JSON are reset.
+    static const std::string DEFAULT_PARAM_NAMES[WorkshopSystem::NUM_PARAMS] = {
+      "Computer X", "Computer Main/Coarse", "Computer Y",
+      "Osc 1 Fine Pitch", "Osc 1 Frequency", "Osc 1 FM Depth",
+      "Osc 2 Fine Pitch", "Osc 2 Frequency", "Osc 2 FM Depth",
+      "Slopes 1 Rate", "Slopes 2 Rate",
+      "Filter 1 FM Depth", "Filter 1 Cutoff", "Filter 1 Resonance",
+      "Filter 2 FM Depth", "Filter 2 Cutoff", "Filter 2 Resonance",
+      "Amplifier Gain", "Voltages Blend", "Stompbox Feedback", "Stompbox Dry/Wet Blend",
+      "Mixer Channel 1 Level", "Mixer Channel 2 Level", "Mixer Channel 3 Level", "Mixer Channel 4 Level",
+      "Mixer Channel 1 Pan", "Mixer Channel 2 Pan", "Mixer Main Volume",
+      "Computer Z Switch", "Amplifier Mode (Clean / LoFi)", "Filter 1 Mode (BP / HP)", "Filter 2 Mode (BP / HP)",
+      "Slopes 1 Shape (FastRise / Both / FastFall)", "Slopes 2 Shape (FastRise / Both / FastFall)",
+      "Slopes 1 Mode (Loop / Slew / Gate)", "Slopes 2 Mode (Loop / Slew / Gate)",
+      "Voltage Button 1", "Voltage Button 2", "Voltage Button 3", "Voltage Button 4"
+    };
+
+    for (int paramId = 0; paramId < WorkshopSystem::NUM_PARAMS; ++paramId) {
+      if (paramId < (int)m->paramQuantities.size()) {
+        auto* pq = m->paramQuantities[paramId];
+        if (pq) {
+          pq->name = DEFAULT_PARAM_NAMES[paramId];
+        }
+      }
+
+      bool isVoltBtn = (paramId >= WorkshopSystem::VOLT_BTN1_PARAM && paramId <= WorkshopSystem::VOLT_BTN4_PARAM);
+      if (isVoltBtn) {
+        m->voltBtnStates[paramId - WorkshopSystem::VOLT_BTN1_PARAM] = (paramId == WorkshopSystem::VOLT_BTN1_PARAM);
+      }
+      float defVal = 0.0f;
+      if (paramId == WorkshopSystem::OSC1_FM_PARAM || paramId == WorkshopSystem::OSC2_FM_PARAM ||
+          paramId == WorkshopSystem::FILTER1_FM_PARAM || paramId == WorkshopSystem::FILTER2_FM_PARAM ||
+          paramId == WorkshopSystem::FILTER1_CUTOFF_PARAM || paramId == WorkshopSystem::FILTER2_CUTOFF_PARAM ||
+          paramId == WorkshopSystem::FILTER1_RES_PARAM || paramId == WorkshopSystem::FILTER2_RES_PARAM ||
+          paramId == WorkshopSystem::AMP_GAIN_PARAM) {
+        defVal = -150.0f;
+      } else if (paramId == WorkshopSystem::COMPUTER_SWITCH_PARAM ||
+                 paramId == WorkshopSystem::SLOPES1_SHAPE_PARAM || paramId == WorkshopSystem::SLOPES2_SHAPE_PARAM ||
+                 paramId == WorkshopSystem::SLOPES1_MODE_PARAM || paramId == WorkshopSystem::SLOPES2_MODE_PARAM) {
+        defVal = 1.0f;
+      }
+      m->params[paramId].setValue(defVal);
+    }
+
+    json_t *csJ = json_object_get(rootJ, "cs");
+    if (csJ && json_is_object(csJ)) {
+      const char *key;
+      json_t *valJ;
+      json_object_foreach(csJ, key, valJ) {
+        int paramId = getParamIdFromShort(key);
+        if (paramId != -1) {
+          float value = 0.0f;
+          if (json_is_array(valJ)) {
+            value = json_integer_value(json_array_get(valJ, 0)) / 1000.0f;
+          } else {
+            value = json_number_value(valJ) / 1000.0f;
+          }
+
+          // Invert switches for VCV Rack compatibility (Web: 0=UP, VCV: 0=DOWN)
+          bool isSwitch3 = (paramId == WorkshopSystem::COMPUTER_SWITCH_PARAM ||
+                            paramId == WorkshopSystem::SLOPES1_SHAPE_PARAM ||
+                            paramId == WorkshopSystem::SLOPES2_SHAPE_PARAM ||
+                            paramId == WorkshopSystem::SLOPES1_MODE_PARAM ||
+                            paramId == WorkshopSystem::SLOPES2_MODE_PARAM);
+          bool isSwitch2 = (paramId == WorkshopSystem::AMP_SWITCH_PARAM ||
+                            paramId == WorkshopSystem::FILTER1_SWITCH_PARAM ||
+                            paramId == WorkshopSystem::FILTER2_SWITCH_PARAM);
+          if (isSwitch3) {
+            value = 2.0f - value;
+          } else if (isSwitch2) {
+            value = 1.0f - value;
+          }
+
+          bool isVoltBtn = (paramId >= WorkshopSystem::VOLT_BTN1_PARAM && paramId <= WorkshopSystem::VOLT_BTN4_PARAM);
+          if (isVoltBtn) {
+            m->voltBtnStates[paramId - WorkshopSystem::VOLT_BTN1_PARAM] = (value > 0.5f);
+          }
+          m->params[paramId].setValue(value);
+        }
+      }
+    }
+
+    json_t *clJ = json_object_get(rootJ, "cl");
+    if (clJ && json_is_object(clJ)) {
+      const char *key;
+      json_t *valJ;
+      json_object_foreach(clJ, key, valJ) {
+        int paramId = getParamIdFromShort(key);
+        if (paramId != -1 && paramId < (int)m->paramQuantities.size()) {
+          auto* pq = m->paramQuantities[paramId];
+          if (pq && json_is_string(valJ)) {
+            pq->name = json_string_value(valJ);
+          }
+        }
+      }
+    }
+
+    if (APP && APP->scene && APP->scene->rack) {
+      std::vector<app::CableWidget *> completeCables = APP->scene->rack->getCompleteCables();
+      for (app::CableWidget *cw : completeCables) {
+        if (cw) {
+          bool isPhonesOut = (cw->outputPort && cw->outputPort->module == m &&
+                              (cw->outputPort->portId == WorkshopSystem::PHONES1_OUT ||
+                               cw->outputPort->portId == WorkshopSystem::PHONES2_OUT));
+          if (!isPhonesOut && (cw->inputPort->module == m || cw->outputPort->module == m)) {
+            APP->scene->rack->removeCable(cw);
+            delete cw;
+          }
+        }
+      }
+
+      json_t *cablesJ = json_object_get(rootJ, "c");
+      if (cablesJ && json_is_array(cablesJ)) {
+        size_t index;
+        json_t *cItemJ;
+        json_array_foreach(cablesJ, index, cItemJ) {
+          json_t *sJ = json_object_get(cItemJ, "s");
+          json_t *eJ = json_object_get(cItemJ, "e");
+          if (sJ && eJ && json_is_string(sJ) && json_is_string(eJ)) {
+            std::string sShort = json_string_value(sJ);
+            std::string eShort = json_string_value(eJ);
+
+            bool startIsInput = false;
+            int startPortId = -1;
+            bool endIsInput = false;
+            int endPortId = -1;
+
+            bool sOk = getPortFromShort(sShort, startIsInput, startPortId);
+            bool eOk = getPortFromShort(eShort, endIsInput, endPortId);
+
+            if (sOk && eOk) {
+              int outputPortId = startPortId;
+              int inputPortId = endPortId;
+              if (startIsInput && !endIsInput) {
+                outputPortId = endPortId;
+                inputPortId = startPortId;
+              }
+
+              app::PortWidget* outputPortWidget = getOutput(outputPortId);
+              app::PortWidget* inputPortWidget = getInput(inputPortId);
+
+              if (outputPortWidget && inputPortWidget) {
+                std::vector<app::CableWidget *> currentCables = APP->scene->rack->getCompleteCables();
+                for (app::CableWidget *cw : currentCables) {
+                  if (cw && cw->inputPort == inputPortWidget) {
+                    APP->scene->rack->removeCable(cw);
+                    delete cw;
+                  }
+                }
+
+                app::CableWidget *cw = new app::CableWidget();
+                json_t *colJ = json_object_get(cItemJ, "c");
+                if (colJ && json_is_string(colJ)) {
+                  cw->color = parseHexColor(json_string_value(colJ));
+                } else {
+                  cw->color = APP->scene->rack->getNextCableColor();
+                }
+                cw->outputPort = outputPortWidget;
+                cw->inputPort = inputPortWidget;
+                cw->updateCable();
+                APP->scene->rack->addCable(cw);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    json_decref(rootJ);
+  }
+
+  void randomizePlausiblePatch() {
+    WorkshopSystem *m = dynamic_cast<WorkshopSystem *>(module);
+    if (!m) return;
+
+    struct ModBlock {
+      std::string name;
+      std::vector<int> inputs;
+      std::vector<int> outputs;
+      std::vector<int> controls;
+    };
+
+    std::vector<ModBlock> blocks = {
+      { "Computer",
+        { WorkshopSystem::COMPUTER_AUDIO1_IN, WorkshopSystem::COMPUTER_AUDIO2_IN, WorkshopSystem::COMPUTER_CV1_IN, WorkshopSystem::COMPUTER_CV2_IN, WorkshopSystem::COMPUTER_PULSE1_IN, WorkshopSystem::COMPUTER_PULSE2_IN },
+        { WorkshopSystem::COMPUTER_AUDIO1_OUT, WorkshopSystem::COMPUTER_AUDIO2_OUT, WorkshopSystem::COMPUTER_CV1_OUT, WorkshopSystem::COMPUTER_CV2_OUT, WorkshopSystem::COMPUTER_PULSE1_OUT, WorkshopSystem::COMPUTER_PULSE2_OUT },
+        { WorkshopSystem::COMPUTER_X_PARAM, WorkshopSystem::COMPUTER_MAIN_PARAM, WorkshopSystem::COMPUTER_Y_PARAM, WorkshopSystem::COMPUTER_SWITCH_PARAM }
+      },
+      { "Osc1",
+        { WorkshopSystem::OSC1_PITCH_IN, WorkshopSystem::OSC1_FM_IN },
+        { WorkshopSystem::OSC1_SQR_OUT, WorkshopSystem::OSC1_SIN_OUT },
+        { WorkshopSystem::OSC1_FINE_PARAM, WorkshopSystem::OSC1_FREQ_PARAM, WorkshopSystem::OSC1_FM_PARAM }
+      },
+      { "Osc2",
+        { WorkshopSystem::OSC2_PITCH_IN, WorkshopSystem::OSC2_FM_IN },
+        { WorkshopSystem::OSC2_SQR_OUT, WorkshopSystem::OSC2_SIN_OUT },
+        { WorkshopSystem::OSC2_FINE_PARAM, WorkshopSystem::OSC2_FREQ_PARAM, WorkshopSystem::OSC2_FM_PARAM }
+      },
+      { "StereoIn",
+        {},
+        { WorkshopSystem::STEREO_L_OUT, WorkshopSystem::STEREO_R_OUT },
+        {}
+      },
+      { "RingMod",
+        { WorkshopSystem::RING_IN1, WorkshopSystem::RING_IN2 },
+        { WorkshopSystem::RING_OUT },
+        {}
+      },
+      { "Stomp",
+        { WorkshopSystem::STOMP_IN, WorkshopSystem::STOMP_RETURN },
+        { WorkshopSystem::STOMP_OUT, WorkshopSystem::STOMP_SEND },
+        { WorkshopSystem::STOMP_FEEDBACK_PARAM, WorkshopSystem::STOMP_BLEND_PARAM }
+      },
+      { "Amp",
+        { WorkshopSystem::AMP_IN },
+        { WorkshopSystem::AMP_OUT },
+        { WorkshopSystem::AMP_GAIN_PARAM, WorkshopSystem::AMP_SWITCH_PARAM }
+      },
+      { "Voltages",
+        {},
+        { WorkshopSystem::VOLT1_OUT, WorkshopSystem::VOLT2_OUT, WorkshopSystem::VOLT3_OUT, WorkshopSystem::VOLT4_OUT },
+        { WorkshopSystem::VOLT_BLEND_PARAM, WorkshopSystem::VOLT_BTN1_PARAM, WorkshopSystem::VOLT_BTN2_PARAM, WorkshopSystem::VOLT_BTN3_PARAM, WorkshopSystem::VOLT_BTN4_PARAM }
+      },
+      { "Filter1",
+        { WorkshopSystem::FILTER1_IN, WorkshopSystem::FILTER1_FM_IN },
+        { WorkshopSystem::FILTER1_HP_OUT, WorkshopSystem::FILTER1_LP_OUT },
+        { WorkshopSystem::FILTER1_FM_PARAM, WorkshopSystem::FILTER1_CUTOFF_PARAM, WorkshopSystem::FILTER1_RES_PARAM, WorkshopSystem::FILTER1_SWITCH_PARAM }
+      },
+      { "Filter2",
+        { WorkshopSystem::FILTER2_IN, WorkshopSystem::FILTER2_FM_IN },
+        { WorkshopSystem::FILTER2_HP_OUT, WorkshopSystem::FILTER2_LP_OUT },
+        { WorkshopSystem::FILTER2_FM_PARAM, WorkshopSystem::FILTER2_CUTOFF_PARAM, WorkshopSystem::FILTER2_RES_PARAM, WorkshopSystem::FILTER2_SWITCH_PARAM }
+      },
+      { "Slopes1",
+        { WorkshopSystem::SLOPES1_IN, WorkshopSystem::SLOPES1_CV_IN },
+        { WorkshopSystem::SLOPES1_OUT },
+        { WorkshopSystem::SLOPES1_RATE_PARAM, WorkshopSystem::SLOPES1_SHAPE_PARAM, WorkshopSystem::SLOPES1_MODE_PARAM }
+      },
+      { "Slopes2",
+        { WorkshopSystem::SLOPES2_IN, WorkshopSystem::SLOPES2_CV_IN },
+        { WorkshopSystem::SLOPES2_OUT },
+        { WorkshopSystem::SLOPES2_RATE_PARAM, WorkshopSystem::SLOPES2_SHAPE_PARAM, WorkshopSystem::SLOPES2_MODE_PARAM }
+      },
+      { "Mixer",
+        { WorkshopSystem::MIXER1_IN, WorkshopSystem::MIXER2_IN, WorkshopSystem::MIXER3_IN, WorkshopSystem::MIXER4_IN },
+        { WorkshopSystem::MIXER_L_OUT, WorkshopSystem::MIXER_R_OUT },
+        { WorkshopSystem::MIX_CH1_PARAM, WorkshopSystem::MIX_CH2_PARAM, WorkshopSystem::MIX_CH3_PARAM, WorkshopSystem::MIX_CH4_PARAM, WorkshopSystem::MIX_PAN1_PARAM, WorkshopSystem::MIX_PAN2_PARAM, WorkshopSystem::MIX_MAIN_PARAM }
+      }
+    };
+
+    for (int paramId = 0; paramId < WorkshopSystem::NUM_PARAMS; ++paramId) {
+      bool isVoltBtn = (paramId >= WorkshopSystem::VOLT_BTN1_PARAM && paramId <= WorkshopSystem::VOLT_BTN4_PARAM);
+      if (isVoltBtn) {
+        m->voltBtnStates[paramId - WorkshopSystem::VOLT_BTN1_PARAM] = (paramId == WorkshopSystem::VOLT_BTN1_PARAM);
+      }
+      float defVal = 0.0f;
+      if (paramId == WorkshopSystem::OSC1_FM_PARAM || paramId == WorkshopSystem::OSC2_FM_PARAM ||
+          paramId == WorkshopSystem::FILTER1_FM_PARAM || paramId == WorkshopSystem::FILTER2_FM_PARAM ||
+          paramId == WorkshopSystem::FILTER1_CUTOFF_PARAM || paramId == WorkshopSystem::FILTER2_CUTOFF_PARAM ||
+          paramId == WorkshopSystem::FILTER1_RES_PARAM || paramId == WorkshopSystem::FILTER2_RES_PARAM ||
+          paramId == WorkshopSystem::AMP_GAIN_PARAM) {
+        defVal = -150.0f;
+      }
+      m->params[paramId].setValue(defVal);
+    }
+
+    int mixerIdx = 12;
+    std::vector<std::pair<int, int>> bestConnections;
+    bool foundValid = false;
+
+    int attempts = 0;
+    const int MAX_ATTEMPTS = 5000;
+
+    while (attempts < MAX_ATTEMPTS) {
+      attempts++;
+      std::vector<std::pair<int, int>> connections;
+      int numConnections = (std::rand() % 7) + 3;
+
+      std::unordered_set<int> usedInputs;
+      std::unordered_set<int> usedOutputs;
+      int genAttempts = 0;
+
+      while ((int)connections.size() < numConnections && genAttempts < 100) {
+        genAttempts++;
+
+        int fromIdx = std::rand() % blocks.size();
+        int toIdx = std::rand() % blocks.size();
+
+        if (blocks[fromIdx].outputs.empty() || blocks[toIdx].inputs.empty()) continue;
+        if (fromIdx == toIdx) continue;
+
+        std::vector<int> availOuts;
+        for (int o : blocks[fromIdx].outputs) {
+          if (usedOutputs.find(o) == usedOutputs.end()) availOuts.push_back(o);
+        }
+        std::vector<int> availIns;
+        for (int i : blocks[toIdx].inputs) {
+          if (usedInputs.find(i) == usedInputs.end()) availIns.push_back(i);
+        }
+
+        if (availOuts.empty() || availIns.empty()) continue;
+
+        int outJack = availOuts[std::rand() % availOuts.size()];
+        int inJack = availIns[std::rand() % availIns.size()];
+
+        connections.push_back({outJack, inJack});
+        usedOutputs.insert(outJack);
+        usedInputs.insert(inJack);
+      }
+
+      if (connections.size() >= 3 && isValidPatch(connections, mixerIdx)) {
+        bestConnections = connections;
+        foundValid = true;
+        break;
+      }
+    }
+
+    if (foundValid) {
+      if (APP && APP->scene && APP->scene->rack) {
+        std::vector<app::CableWidget *> completeCables = APP->scene->rack->getCompleteCables();
+        for (app::CableWidget *cw : completeCables) {
+          if (cw) {
+            bool isPhonesOut = (cw->outputPort && cw->outputPort->module == m &&
+                                (cw->outputPort->portId == WorkshopSystem::PHONES1_OUT ||
+                                 cw->outputPort->portId == WorkshopSystem::PHONES2_OUT));
+            if (!isPhonesOut && (cw->inputPort->module == m || cw->outputPort->module == m)) {
+              APP->scene->rack->removeCable(cw);
+              delete cw;
+            }
+          }
+        }
+      }
+
+      std::unordered_set<int> connectedBlocks;
+      for (const auto& c : bestConnections) {
+        int fromIdx = getBlockIdxByPort(c.first, false);
+        int toIdx = getBlockIdxByPort(c.second, true);
+        if (fromIdx != -1) connectedBlocks.insert(fromIdx);
+        if (toIdx != -1) connectedBlocks.insert(toIdx);
+      }
+      connectedBlocks.insert(mixerIdx);
+
+      auto randomizeBlockControls = [&](int blockIdx) {
+        for (int paramId : blocks[blockIdx].controls) {
+          bool isSwitch = (paramId == WorkshopSystem::COMPUTER_SWITCH_PARAM ||
+                           paramId == WorkshopSystem::AMP_SWITCH_PARAM ||
+                           paramId == WorkshopSystem::FILTER1_SWITCH_PARAM ||
+                           paramId == WorkshopSystem::FILTER2_SWITCH_PARAM ||
+                           paramId == WorkshopSystem::SLOPES1_SHAPE_PARAM ||
+                           paramId == WorkshopSystem::SLOPES2_SHAPE_PARAM ||
+                           paramId == WorkshopSystem::SLOPES1_MODE_PARAM ||
+                           paramId == WorkshopSystem::SLOPES2_MODE_PARAM);
+          bool isButton = (paramId >= WorkshopSystem::VOLT_BTN1_PARAM && paramId <= WorkshopSystem::VOLT_BTN4_PARAM);
+
+          if (isSwitch) {
+            int numStates = 2;
+            if (paramId == WorkshopSystem::COMPUTER_SWITCH_PARAM ||
+                paramId == WorkshopSystem::SLOPES1_SHAPE_PARAM ||
+                paramId == WorkshopSystem::SLOPES2_SHAPE_PARAM ||
+                paramId == WorkshopSystem::SLOPES1_MODE_PARAM ||
+                paramId == WorkshopSystem::SLOPES2_MODE_PARAM) {
+              numStates = 3;
+            }
+            m->params[paramId].setValue((float)(std::rand() % numStates));
+          } else if (isButton) {
+          } else {
+            float angle = (float)(std::rand() % 301 - 150);
+            m->params[paramId].setValue(angle);
+          }
+        }
+
+        if (blockIdx == 7) {
+          int activeBtn = std::rand() % 4;
+          for (int i = 0; i < 4; ++i) {
+            m->voltBtnStates[i] = (i == activeBtn);
+            m->params[WorkshopSystem::VOLT_BTN1_PARAM + i].setValue(i == activeBtn ? 1.0f : 0.0f);
+          }
+        }
+      };
+
+      for (int blockIdx : connectedBlocks) {
+        randomizeBlockControls(blockIdx);
+      }
+
+      if (!g_card_registry.empty()) {
+        std::vector<int> possibleIdxs;
+        for (size_t i = 0; i < g_card_registry.size(); ++i) {
+          if (g_card_registry[i].id != "none" && !g_card_registry[i].id.empty()) {
+            possibleIdxs.push_back((int)i);
+          }
+        }
+        if (!possibleIdxs.empty()) {
+          int randIdx = possibleIdxs[std::rand() % possibleIdxs.size()];
+          m->change_card(randIdx);
+          if (g_card_registry[randIdx].id == "utility_pair") {
+            m->utility_indices[0] = std::rand() % 24;
+            m->utility_indices[1] = std::rand() % 24;
+            m->change_card(randIdx);
+          }
+        }
+      }
+
+      m->params[WorkshopSystem::MIX_MAIN_PARAM].setValue(50.0f);
+
+      for (const auto& c : bestConnections) {
+        int inPortId = c.second;
+        if (inPortId == WorkshopSystem::MIXER1_IN) m->params[WorkshopSystem::MIX_CH1_PARAM].setValue((float)(std::rand() % 100 + 50));
+        else if (inPortId == WorkshopSystem::MIXER2_IN) m->params[WorkshopSystem::MIX_CH2_PARAM].setValue((float)(std::rand() % 100 + 50));
+        else if (inPortId == WorkshopSystem::MIXER3_IN) m->params[WorkshopSystem::MIX_CH3_PARAM].setValue((float)(std::rand() % 100 + 50));
+        else if (inPortId == WorkshopSystem::MIXER4_IN) m->params[WorkshopSystem::MIX_CH4_PARAM].setValue((float)(std::rand() % 100 + 50));
+
+        if (inPortId == WorkshopSystem::AMP_IN) {
+          m->params[WorkshopSystem::AMP_GAIN_PARAM].setValue(0.0f);
+        }
+      }
+
+      if (m->params[WorkshopSystem::FILTER1_CUTOFF_PARAM].getValue() < -50.0f) {
+        m->params[WorkshopSystem::FILTER1_CUTOFF_PARAM].setValue((float)(std::rand() % 100 - 50));
+      }
+      if (m->params[WorkshopSystem::FILTER2_CUTOFF_PARAM].getValue() < -50.0f) {
+        m->params[WorkshopSystem::FILTER2_CUTOFF_PARAM].setValue((float)(std::rand() % 100 - 50));
+      }
+
+      if (APP && APP->scene && APP->scene->rack) {
+        for (const auto& c : bestConnections) {
+          app::PortWidget* outputPortWidget = getOutput(c.first);
+          app::PortWidget* inputPortWidget = getInput(c.second);
+          if (outputPortWidget && inputPortWidget) {
+            app::CableWidget *cw = new app::CableWidget();
+            cw->color = APP->scene->rack->getNextCableColor();
+            cw->outputPort = outputPortWidget;
+            cw->inputPort = inputPortWidget;
+            cw->updateCable();
+            APP->scene->rack->addCable(cw);
+          }
+        }
+      }
     }
   }
 
