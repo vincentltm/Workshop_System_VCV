@@ -1023,6 +1023,62 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
   int get_utility_index(int slot) const override { return utility_indices[slot & 1]; }
   void set_pending_page_direction(int dir) override { pending_page_direction = dir; }
 
+  void run_integration_tests() {
+    int original_card = activeCardIdx;
+    int passed_count = 0;
+    int failed_count = 0;
+    std::string failed_list = "";
+
+    // Temporarily pause audio processing block if active
+    bool was_blocked = card_globals.block_audio_processing.load();
+    card_globals.block_audio_processing.store(true);
+
+    for (size_t i = 0; i < g_card_registry.size(); i++) {
+      std::string card_id = g_card_registry[i].id;
+      INFO("Diagnostics: Testing card %zu/%zu: %s ...", i + 1, g_card_registry.size(), card_id.c_str());
+      try {
+        // Change card without loading flash to keep it fast
+        change_card_impl((int)i, false);
+
+        if (card_globals.card_ptr) {
+          // Feed simulated samples to run constructor + process logic
+          for (int sample = 0; sample < 1000; sample++) {
+            card_globals.card_ptr->update_inputs();
+            card_globals.card_ptr->ProcessSample();
+          }
+          passed_count++;
+          INFO(" -> Card %s: PASS", card_id.c_str());
+        } else {
+          failed_count++;
+          failed_list += card_id + " (missing card_ptr), ";
+          WARN(" -> Card %s: FAIL (missing card_ptr)", card_id.c_str());
+        }
+      } catch (const std::exception& e) {
+        failed_count++;
+        failed_list += card_id + " (" + std::string(e.what()) + "), ";
+        WARN(" -> Card %s: FAIL (%s)", card_id.c_str(), e.what());
+      } catch (...) {
+        failed_count++;
+        failed_list += card_id + " (crash), ";
+        WARN(" -> Card %s: FAIL (unknown crash)", card_id.c_str());
+      }
+    }
+
+    // Restore original state
+    change_card_impl(original_card);
+    card_globals.block_audio_processing.store(was_blocked);
+
+    // Notify user via dialog
+    std::string msg;
+    if (failed_count == 0) {
+      msg = "Diagnostics Complete!\nAll " + std::to_string(passed_count) + " cards loaded, initialized, and processed simulated audio samples successfully.";
+      osdialog_message(OSDIALOG_INFO, OSDIALOG_OK, msg.c_str());
+    } else {
+      msg = "Diagnostics Failed!\nPassed: " + std::to_string(passed_count) + "\nFailed: " + std::to_string(failed_count) + "\nFailed cards: " + failed_list;
+      osdialog_message(OSDIALOG_ERROR, OSDIALOG_OK, msg.c_str());
+    }
+  }
+
   // WebSocket MIDI and Serial queues for Web UI
   ThreadSafeMessageQueue websocket_midi_tx_queue;
   ThreadSafeMessageQueue websocket_serial_tx_queue;
@@ -3590,6 +3646,22 @@ struct WorkshopSystemWidget : ModuleWidget {
       clearFlashItem->text = "Clear Flash Memory (Reset to 0xFF)";
       clearFlashItem->module = m;
       menu->addChild(clearFlashItem);
+
+      // Diagnostics actions
+      menu->addChild(new MenuSeparator());
+      menu->addChild(createMenuLabel("Diagnostics"));
+
+      struct RunIntegrationTestsItem : MenuItem {
+        WorkshopSystem* module;
+        void onAction(const event::Action& e) override {
+          module->run_integration_tests();
+        }
+      };
+
+      RunIntegrationTestsItem* runTestsItem = new RunIntegrationTestsItem();
+      runTestsItem->text = "Run Card Integration Tests";
+      runTestsItem->module = m;
+      menu->addChild(runTestsItem);
     }
   }
 
