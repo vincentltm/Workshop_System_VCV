@@ -8,6 +8,7 @@
 #include "dsp/Voltages.hpp"
 #include "plugin_local.hpp"
 #include "shared/ComputerWidgets.hpp"
+#include "shared/ExtendedMetadata.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -1031,6 +1032,132 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     change_card(activeCardIdx); // Reload card to engage the new utility
   }
   void set_pending_page_direction(int dir) override { pending_page_direction = dir; }
+  float get_switch_z_val() const override { return params[COMPUTER_SWITCH_PARAM].value; }
+
+  std::string last_card_id = "";
+  int last_switch_z = -1;
+
+  void update_metadata_labels() {
+    std::string card_id = get_active_card_id();
+    int z_val = (int)get_switch_z_val();
+    if (z_val < 0) z_val = 0;
+    if (z_val > 2) z_val = 2;
+
+    const auto* meta = ExtendedMetadata::get_card_metadata(card_id);
+
+    int input_mapping[6] = {
+      COMPUTER_AUDIO1_IN, COMPUTER_AUDIO2_IN, COMPUTER_CV1_IN, COMPUTER_CV2_IN, COMPUTER_PULSE1_IN, COMPUTER_PULSE2_IN
+    };
+    int output_mapping[6] = {
+      COMPUTER_AUDIO1_OUT, COMPUTER_AUDIO2_OUT, COMPUTER_CV1_OUT, COMPUTER_CV2_OUT, COMPUTER_PULSE1_OUT, COMPUTER_PULSE2_OUT
+    };
+
+    for (int i = 0; i < 6; i++) {
+      int in_id = input_mapping[i];
+      if (in_id >= 0 && in_id < (int)inputInfos.size() && inputInfos[in_id]) {
+        if (meta) {
+          inputInfos[in_id]->name = meta->inputs[i].name;
+          inputInfos[in_id]->description = meta->inputs[i].description;
+        } else {
+          inputInfos[in_id]->name = "";
+          inputInfos[in_id]->description = "";
+        }
+      }
+
+      int out_id = output_mapping[i];
+      if (out_id >= 0 && out_id < (int)outputInfos.size() && outputInfos[out_id]) {
+        if (meta) {
+          outputInfos[out_id]->name = meta->outputs[i].name;
+          outputInfos[out_id]->description = meta->outputs[i].description;
+        } else {
+          outputInfos[out_id]->name = "";
+          outputInfos[out_id]->description = "";
+        }
+      }
+    }
+
+    int knob_mapping[3] = {
+      COMPUTER_MAIN_PARAM, COMPUTER_X_PARAM, COMPUTER_Y_PARAM
+    };
+    std::string knob_labels[3] = { "Main Parameter", "X Parameter", "Y Parameter" };
+
+    for (int k = 0; k < 3; k++) {
+      int param_id = knob_mapping[k];
+      if (param_id >= 0 && param_id < (int)paramQuantities.size() && paramQuantities[param_id]) {
+        std::string name = knob_labels[k];
+        std::string desc = "";
+
+        if (meta) {
+          const auto& contexts = meta->knobs[k];
+          std::vector<const ExtendedMetadata::KnobContext*> matches;
+          for (const auto& ctx : contexts) {
+            bool match = false;
+            if (ctx.z == "any") {
+              match = true;
+            } else if (ctx.z == "down" && z_val == 0) {
+              match = true;
+            } else if (ctx.z == "middle" && z_val == 1) {
+              match = true;
+            } else if (ctx.z == "up" && z_val == 2) {
+              match = true;
+            }
+            if (match) {
+              matches.push_back(&ctx);
+            }
+          }
+
+          if (!matches.empty()) {
+            name = "";
+            desc = "";
+            for (size_t i = 0; i < matches.size(); i++) {
+              const auto* ctx = matches[i];
+              std::string label = ctx->name;
+              std::string suffix = "";
+              if (!ctx->gesture.empty()) {
+                suffix = " [" + ctx->gesture + "]";
+              } else if (!ctx->mode.empty()) {
+                suffix = " [" + ctx->mode + "]";
+              }
+
+              if (i > 0) {
+                name += " / ";
+                desc += "\n";
+              }
+              name += label + suffix;
+              desc += (suffix.empty() ? "" : suffix + ": ") + ctx->description;
+            }
+          }
+        }
+
+        paramQuantities[param_id]->name = name;
+        paramQuantities[param_id]->description = desc;
+      }
+    }
+
+    int z_param_id = COMPUTER_SWITCH_PARAM;
+    if (z_param_id >= 0 && z_param_id < (int)paramQuantities.size() && paramQuantities[z_param_id]) {
+      std::string name = "Switch Position (Down/Middle/Up)";
+      std::string desc = "";
+      if (meta && meta->has_switch_metadata) {
+        if (z_val == 2) {
+          name = meta->z_switch.up.name;
+          desc = meta->z_switch.up.description;
+        } else if (z_val == 1) {
+          name = meta->z_switch.middle.name;
+          desc = meta->z_switch.middle.description;
+        } else {
+          name = meta->z_switch.down.name;
+          desc = meta->z_switch.down.description;
+        }
+      } else {
+        if (z_val == 2) desc = "Switch position Up";
+        else if (z_val == 1) desc = "Switch position Middle";
+        else desc = "Switch position Down";
+      }
+      paramQuantities[z_param_id]->name = name;
+      paramQuantities[z_param_id]->description = desc;
+    }
+  }
 
   void run_integration_tests() {
     int original_card = activeCardIdx;
@@ -3802,6 +3929,15 @@ struct WorkshopSystemWidget : ModuleWidget {
           m->transientPlayer.trigger(plugJackOutGroup, 0.8f);
         }
         lastIncompleteCount = currentIncompleteCount;
+      }
+
+      // Track metadata/hover description updates
+      std::string card_id = m->get_active_card_id();
+      int z_val = (int)m->get_switch_z_val();
+      if (card_id != m->last_card_id || z_val != m->last_switch_z) {
+        m->last_card_id = card_id;
+        m->last_switch_z = z_val;
+        m->update_metadata_labels();
       }
     }
   }
