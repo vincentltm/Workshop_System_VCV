@@ -1040,9 +1040,6 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
   void update_metadata_labels() {
     std::string card_id = get_active_card_id();
     int z_val = (int)get_switch_z_val();
-    std::ofstream debug_log("/Users/vmaurer/Music/Workshop_VCV_Dev/labels_debug.log", std::ios::app);
-    debug_log << "WorkshopSystem::update_metadata_labels called: card_id=" << card_id << " z_val=" << z_val << "\n";
-    debug_log.close();
     if (z_val < 0) z_val = 0;
     if (z_val > 2) z_val = 2;
 
@@ -4186,6 +4183,27 @@ struct WorkshopSystemWidget : ModuleWidget {
           openItem->manager_file = manager_file;
           menu->addChild(openItem);
         }
+      }
+
+      // Open Card Manual / Editor
+      if (!m->card_globals.active_card_id_str.empty()) {
+          std::string card_id = m->card_globals.active_card_id_str;
+          const auto* meta = ExtendedMetadata::get_card_metadata(card_id);
+          if (meta && !meta->editor.empty()) {
+              menu->addChild(new MenuSeparator());
+
+              struct OpenManualItem : MenuItem {
+                  std::string url;
+                  void onAction(const event::Action& e) override {
+                      system::openBrowser(url);
+                  }
+              };
+
+              OpenManualItem* manualItem = new OpenManualItem();
+              manualItem->text = "Open Card Manual / Editor...";
+              manualItem->url = meta->editor;
+              menu->addChild(manualItem);
+          }
       }
 
 
