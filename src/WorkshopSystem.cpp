@@ -1003,8 +1003,14 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
   int stompCheckCounter = 0;
   bool connectedToPedalboard = false;
 
-
-  // Self patch flags set by widget
+  // Stereo Line In noise state variables
+  uint32_t stereoNoiseSeed = 987654321;
+  float stereoPinkB0[2] = {0.0f, 0.0f};
+  float stereoPinkB1[2] = {0.0f, 0.0f};
+  float stereoPinkB2[2] = {0.0f, 0.0f};
+  float stereoHumPhase = 0.0f;
+  float lastOsc1Mix = 0.0f;
+  float lastOsc2Mix = 0.0f;
   bool isOsc1SelfPatched = false;
   bool isOsc2SelfPatched = false;
 
@@ -1998,6 +2004,8 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
 
     // Seed random for noise generator
     std::srand(std::time(nullptr));
+    stereoNoiseSeed = std::rand() ^ reinterpret_cast<uintptr_t>(this);
+    stereoHumPhase = (((float)std::rand() / RAND_MAX) * 2.0f * M_PI);
 
     for (int i = 0; i < NUM_PARAMS; ++i) {
       lastParams[i] = params[i].getValue();
@@ -2030,6 +2038,7 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     filter1.setSampleRate(sr);
     filter2.setSampleRate(sr);
     amp.setSampleRate(sr);
+    stomp.setSampleRate(sr);
   }
 
   // Helper functions for parameter scaling (mapping degrees to exact values)
@@ -2230,25 +2239,82 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     // Polyphonic jack: Ch1 = Left, Ch2 = Right. Mono cable grounds Right (TRS
     // tip normalisation).
     float stL = 0.0f, stR = 0.0f;
+
+    // 1. Generate LCG noise for stereo line in preamps
+    stereoNoiseSeed = stereoNoiseSeed * 1664525 + 1013904223;
+    float stNoiseRawL = ((float)stereoNoiseSeed / 4294967296.0f) - 0.5f; // [-0.5, 0.5]
+    stereoNoiseSeed = stereoNoiseSeed * 1664525 + 1013904223;
+    float stNoiseRawR = ((float)stereoNoiseSeed / 4294967296.0f) - 0.5f; // [-0.5, 0.5]
+
+    // 2. Generate pink noise for both channels
+    float dt = 1.0f / args.sampleRate;
+    float whiteL = stNoiseRawL * 2.0f;
+    stereoPinkB0[0] = 0.99765f * stereoPinkB0[0] + whiteL * 0.0990460f;
+    stereoPinkB1[0] = 0.96300f * stereoPinkB1[0] + whiteL * 0.2965164f;
+    stereoPinkB2[0] = 0.57000f * stereoPinkB2[0] + whiteL * 1.0526913f;
+    float pinkL = (stereoPinkB0[0] + stereoPinkB1[0] + stereoPinkB2[0] + whiteL * 0.1848f) * 0.05f;
+
+    float whiteR = stNoiseRawR * 2.0f;
+    stereoPinkB0[1] = 0.99765f * stereoPinkB0[1] + whiteR * 0.0990460f;
+    stereoPinkB1[1] = 0.96300f * stereoPinkB1[1] + whiteR * 0.2965164f;
+    stereoPinkB2[1] = 0.57000f * stereoPinkB2[1] + whiteR * 1.0526913f;
+    float pinkR = (stereoPinkB0[1] + stereoPinkB1[1] + stereoPinkB2[1] + whiteR * 0.1848f) * 0.05f;
+
+    // 3. Generate mains hum (60Hz + harmonics)
+    stereoHumPhase += 2.0f * M_PI * 60.0f * dt;
+    if (stereoHumPhase > 2.0f * M_PI) {
+        stereoHumPhase -= 2.0f * M_PI;
+    }
+    float hum = std::sin(stereoHumPhase) + 0.3f * std::sin(stereoHumPhase * 2.0f) + 0.15f * std::sin(stereoHumPhase * 3.0f);
+    hum /= 1.45f;
+
+    // 4. Calculate oscillator capacitive coupling bleed (crosstalk from nearby PCB traces)
+    float osc1_mix = osc1SinVolts + (osc1Out.square * 4.45f);
+    float osc2_mix = osc2SinVolts + (osc2Out.square * 4.45f);
+    float bleed = ((osc1_mix - lastOsc1Mix) + (osc2_mix - lastOsc2Mix)) * 0.0004f;
+    lastOsc1Mix = osc1_mix;
+    lastOsc2Mix = osc2_mix;
+
+    // 5. Scale noise based on connection state (connected cables pick up more electromagnetic hum/noise)
+    float noiseScale = inputs[STEREO_IN_JACK].isConnected() ? 0.04f : 0.0015f;
+    float stNoiseL = (stNoiseRawL * noiseScale) + (pinkL * 1.2f * noiseScale) + (hum * 0.5f * noiseScale);
+    float stNoiseR = (stNoiseRawR * noiseScale) + (pinkR * 1.2f * noiseScale) + (hum * 0.5f * noiseScale);
+
+    float bleedL = 0.0f;
+    float bleedR = 0.0f;
     if (inputs[STEREO_IN_JACK].isConnected()) {
-      stL = inputs[STEREO_IN_JACK].getPolyVoltage(0);
-      stR = (inputs[STEREO_IN_JACK].getChannels() >= 2)
+        if (inputs[STEREO_IN_JACK].getChannels() < 2) {
+            bleedR = bleed;
+        }
+    } else if (!stereoDeviceInput.getDevice()) {
+        bleedL = bleed;
+        bleedR = bleed;
+    }
+
+    if (inputs[STEREO_IN_JACK].isConnected()) {
+      stL = inputs[STEREO_IN_JACK].getPolyVoltage(0) + stNoiseL + bleedL;
+      // TS mono plug grounds the Right channel (no normalling)
+      stR = ((inputs[STEREO_IN_JACK].getChannels() >= 2)
                 ? inputs[STEREO_IN_JACK].getPolyVoltage(1)
-                : 0.0f;
+                : 0.0f) + stNoiseR + bleedR;
     } else if (stereoDeviceInput.getDevice()) {
       if (!stereoDeviceInput.inputBuffer.empty()) {
         StereoFrame frame = stereoDeviceInput.inputBuffer.shift();
-        stL = frame.l;
-        stR = frame.r;
+        stL = frame.l + stNoiseL + bleedL;
+        stR = frame.r + stNoiseR + bleedR;
+      } else {
+        stL = stNoiseL + bleedL;
+        stR = stNoiseR + bleedR;
       }
     } else {
-      // Unconnected: tiny open-input noise floor (audio interface simulation)
-      stL = (((float)std::rand() / RAND_MAX) - 0.5f) * 1.5e-5f;
-      stR = (((float)std::rand() / RAND_MAX) - 0.5f) * 1.5e-5f;
+      // Unconnected: quiet background noise floor
+      stL = stNoiseL + bleedL;
+      stR = stNoiseR + bleedR;
     }
-    // Stereo Line In applies 2.44x gain (measured from stereo_in recording)
-    outputs[STEREO_L_OUT].setVoltage(stL * 2.44f);
-    outputs[STEREO_R_OUT].setVoltage(stR * 2.44f);
+
+    // Stereo Line In applies 2.44x gain with output clamping at line level (+/-1.2V)
+    outputs[STEREO_L_OUT].setVoltage(std::max(-1.2f, std::min(1.2f, stL * 2.44f)));
+    outputs[STEREO_R_OUT].setVoltage(std::max(-1.2f, std::min(1.2f, stR * 2.44f)));
 
     // --- 6. RING MODULATOR ---
     // Normals: A = Osc1 Sin, B = Osc2 Sin
@@ -2263,44 +2329,18 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     // --- 7. STOMPBOX ---
     // (connectedToPedalboard is updated from the UI thread inside step())
 
-    float returnScale = connectedToPedalboard ? 1.0f : 10.0f;
-    float sendScale = connectedToPedalboard ? 1.0f : 0.09f;
-
     float stompIn = inputs[STOMP_IN].getVoltage();
-    float returnIn = 0.0f;
-    float returnInModular = 0.0f;
-    float wetSource = 0.0f;
-
-    if (inputs[STOMP_RETURN].isConnected()) {
-      returnIn = inputs[STOMP_RETURN].getVoltage();
-      // Boost return, clamped to ±11.5V rails
-      returnInModular = std::max(-11.5f, std::min(11.5f, returnIn * returnScale));
-      wetSource = returnInModular;
-    } else {
-      // Normalled feedback path: return = last stompbox send
-      returnInModular = std::max(-11.5f, std::min(11.5f, stompLastSend * 0.9f));
-      wetSource = 0.0f; // Blend wet side is silent when nothing is plugged in
-    }
-
-    float stompBlend =
-        getKnobValue(params[STOMP_BLEND_PARAM].getValue(), 0.0f, 1.0f);
+    float returnInJack = inputs[STOMP_RETURN].getVoltage();
+    bool returnConnected = inputs[STOMP_RETURN].isConnected();
     float fbAngle = params[STOMP_FEEDBACK_PARAM].getValue();
-    float stompFbGain =
-        (std::abs(fbAngle) > 10.0f) ? (fbAngle / 150.0f) * 0.556f : 0.0f;
+    float blendAngle = params[STOMP_BLEND_PARAM].getValue();
 
-    float sendModular =
-        stomp.processSend(stompIn, returnInModular, stompFbGain);
-    // Clamp the feedback summing stage (SEND) to the ±11.5V rails
-    sendModular = std::max(-11.5f, std::min(11.5f, sendModular));
+    float stompSend = 0.0f;
+    float stompOutVal = 0.0f;
 
-    // Save send for next sample normalization
-    stompLastSend = sendModular;
+    stomp.process(stompIn, returnInJack, returnConnected, connectedToPedalboard, fbAngle, blendAngle, stompSend, stompOutVal);
 
-    // Scale send to line level or keep modular level
-    outputs[STOMP_SEND].setVoltage(sendModular * sendScale);
-    float stompOutVal = stomp.processOut(sendModular, wetSource, stompBlend);
-    // Clamp the final output mix to the ±11.5V rails
-    stompOutVal = std::max(-11.5f, std::min(11.5f, stompOutVal));
+    outputs[STOMP_SEND].setVoltage(stompSend);
     outputs[STOMP_OUT].setVoltage(stompOutVal);
 
     // --- 8. AMPLIFIER ---

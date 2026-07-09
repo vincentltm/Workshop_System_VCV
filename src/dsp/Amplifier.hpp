@@ -2,6 +2,8 @@
 #include <cmath>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
+#include <ctime>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -21,6 +23,24 @@ struct Amplifier {
     float lofiInHpState = 0.0f;
     float lofiFeedbackState = 0.0f;
     float lofiOutHpState = 0.0f;
+
+    // --- Noise State Variables ---
+    float pinkB0 = 0.0f;
+    float pinkB1 = 0.0f;
+    float pinkB2 = 0.0f;
+
+    float stagePinkB0 = 0.0f;
+    float stagePinkB1 = 0.0f;
+    float stagePinkB2 = 0.0f;
+
+    float humPhase = 0.0f;
+    float popcornState = 0.0f;
+
+    Amplifier() {
+        static uint32_t counter = 0;
+        noiseSeed = std::rand() ^ (counter++ * 0x9e3779b9) ^ reinterpret_cast<uintptr_t>(this);
+        humPhase = (((float)std::rand() / RAND_MAX) * 2.0f * M_PI);
+    }
 
     float soft_clip(float x, float limit) {
         float threshold = limit * 0.8f;
@@ -73,14 +93,41 @@ struct Amplifier {
 
         float norm_gain = std::max(0.0f, std::min(1.0f, gainVal));
 
+        // 1. Update Noise Sources
         // Fast thread-safe LCG noise generator
         noiseSeed = noiseSeed * 1664525 + 1013904223;
         float noiseRaw = ((float)noiseSeed / 4294967296.0f) - 0.5f; // [-0.5, 0.5]
-        float analogNoise = noiseRaw * 0.0002f; // 100uV peak-to-peak input noise floor
+
+        // Pink noise (1/f) approximation via 3-pole filter
+        float white = noiseRaw * 2.0f; // Scale to [-1.0, 1.0]
+        pinkB0 = 0.99765f * pinkB0 + white * 0.0990460f;
+        pinkB1 = 0.96300f * pinkB1 + white * 0.2965164f;
+        pinkB2 = 0.57000f * pinkB2 + white * 1.0526913f;
+        float pink = (pinkB0 + pinkB1 + pinkB2 + white * 0.1848f) * 0.05f; // [-0.5, 0.5] approx
+
+        // Mains hum (60 Hz + 120 Hz + 180 Hz)
+        humPhase += 2.0f * M_PI * 60.0f * dt;
+        if (humPhase > 2.0f * M_PI) {
+            humPhase -= 2.0f * M_PI;
+        }
+        float hum = std::sin(humPhase) + 0.3f * std::sin(humPhase * 2.0f) + 0.15f * std::sin(humPhase * 3.0f);
+        hum /= 1.45f; // [-0.5, 0.5] approx
 
         if (mode == 0) {
             // --- Clean / Mic Mode (Mikrophonie style) ---
+            // Update popcorn noise (crackle)
+            noiseSeed = noiseSeed * 1664525 + 1013904223;
+            float randPop = ((float)noiseSeed / 4294967296.0f) - 0.5f;
+            if (randPop > 0.4998f) {
+                noiseSeed = noiseSeed * 1664525 + 1013904223;
+                popcornState = (((float)noiseSeed / 4294967296.0f) - 0.5f) * 0.05f;
+            }
+
+            // Input-referred noise floor components (higher noise presence to scale with the massive 207x gain):
+            // White: 300uV pp, Pink: 400uV pp, Hum: 150uV pp, Popcorn: 50uV pp
+            float analogNoise = (noiseRaw * 0.0006f) + (pink * 0.0008f) + (hum * 0.0003f) + (popcornState * 0.001f);
             float micInput = inputVal + analogNoise;
+
             // Input HPF: C5 (4.7u) and R5 (1.0M) to GND -> fc = 0.034 Hz
             float rc_hp = 4.7f;
             float alpha_hp = dt / (rc_hp + dt);
@@ -105,19 +152,31 @@ struct Amplifier {
             float rc_lp = R_f * 22e-12f;
             float alpha_lp = dt / (rc_lp + dt);
 
-            // Shelving LPF feedback path:
-            float feedback_term = hpFiltered * (Av - 1.0f);
-            micLpState += alpha_lp * (feedback_term - micLpState);
+            // Clip-aware non-inverting op-amp simulation to prevent state blow-up ("lockup")
+            float limit = 11.5f;
 
-            float preamp_out = hpFiltered + micLpState;
+            // 1. Calculate linear state update
+            float V_c_lin = micLpState + alpha_lp * ((Av - 1.0f) * hpFiltered - micLpState);
+            float V_out_lin = hpFiltered + V_c_lin;
 
-            // Clip symmetrically using soft_clip at 11.5V (standard rail limit on 12V rails)
-            preamp_out_volts = soft_clip(preamp_out, 11.5f);
+            float preamp_out = V_out_lin;
+            if (std::abs(V_out_lin) > limit * 0.8f) { // Enter soft-clipping region
+                preamp_out = soft_clip(V_out_lin, limit);
+                // Update feedback capacitor based on actual physically-clamped output
+                micLpState = ((1.0f - alpha_lp) * micLpState + alpha_lp * (Av - 1.0f) * preamp_out) / (1.0f + alpha_lp * (Av - 1.0f));
+            } else {
+                micLpState = V_c_lin;
+            }
+
+            preamp_out_volts = preamp_out;
         } else {
             // --- LoFi Mode (Mini Drive style) ---
+            // Input-referred noise floor (white + pink + hum) - scaled to standard levels
+            float v_n_in = (noiseRaw * 0.0002f) + (pink * 0.00024f) + (hum * 0.0001f);
+
             // Input attenuation based on fitted gain taper lookup table
             float taper = getLofiTaper(norm_gain);
-            float input_attenuated = (inputVal + analogNoise) * taper;
+            float input_attenuated = (inputVal + v_n_in) * taper;
 
             // Input HPF: C3 (100n) and R2 (100k) to GND -> fc = 15.9 Hz
             float rc_in = 1.0f / (2.0f * M_PI * 15.9f);
@@ -125,14 +184,24 @@ struct Amplifier {
             lofiInHpState += alpha_in * (input_attenuated - lofiInHpState);
             float v_in_ac = input_attenuated - lofiInHpState;
 
+            // Stage-referred noise floor of the BJT differential pair (scales with gain so it is silent when off)
+            noiseSeed = noiseSeed * 1664525 + 1013904223;
+            float stageNoiseRaw = ((float)noiseSeed / 4294967296.0f) - 0.5f;
+
+            stagePinkB0 = 0.99765f * stagePinkB0 + stageNoiseRaw * 2.0f * 0.0990460f;
+            stagePinkB1 = 0.96300f * stagePinkB1 + stageNoiseRaw * 2.0f * 0.2965164f;
+            stagePinkB2 = 0.57000f * stagePinkB2 + stageNoiseRaw * 2.0f * 1.0526913f;
+            float stagePink = (stagePinkB0 + stagePinkB1 + stagePinkB2 + stageNoiseRaw * 2.0f * 0.1848f) * 0.05f;
+
+            // Scale stage-referred noise directly by norm_gain and set standard levels (300uV pp at max gain)
+            float v_n_stage = ((stageNoiseRaw * 0.0003f) + (stagePink * 0.0003f) + (hum * 0.00015f)) * norm_gain;
+
             // Physically accurate closed-loop BJT differential pair & output stage model.
-            // With high open-loop gain (~3000) and no local degeneration, the feedback loop closes
-            // and behaves as a hard-clipped op-amp stage.
             // Closed-loop gain A_cl = 201.0f, asymmetrical clipping rails: V_low = -9.2f, V_high = 5.3f.
             const float A_cl = 201.0f;
             const float V_low = -9.2f;
             const float V_high = 5.3f;
-            float v_out = std::max(V_low, std::min(V_high, A_cl * v_in_ac));
+            float v_out = std::max(V_low, std::min(V_high, A_cl * (v_in_ac + v_n_stage)));
             lofiFeedbackState = v_out / A_cl;
 
             // Output HPF: C7 (1u) and load (100k) -> fc = 1.59 Hz
