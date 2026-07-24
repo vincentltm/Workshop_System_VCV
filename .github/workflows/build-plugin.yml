@@ -47,8 +47,10 @@ jobs:
           submodules: false
       - name: Checkout Submodules
         run: |
+          git config --global --add safe.directory '*'
           git submodule update --init deps/Workshop_Computer_VCV
           cd deps/Workshop_Computer_VCV
+          git config --global --add safe.directory '*'
           git submodule update --init deps/Workshop_Computer
           git submodule update --init deps/external/52_lens
       - uses: actions/cache@v4
@@ -81,8 +83,10 @@ jobs:
           submodules: false
       - name: Checkout Submodules
         run: |
+          git config --global --add safe.directory '*'
           git submodule update --init deps/Workshop_Computer_VCV
           cd deps/Workshop_Computer_VCV
+          git config --global --add safe.directory '*'
           git submodule update --init deps/Workshop_Computer
           git submodule update --init deps/external/52_lens
       - uses: actions/cache@v4
