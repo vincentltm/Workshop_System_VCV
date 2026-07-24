@@ -1061,9 +1061,9 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     for (int i = 0; i < 6; i++) {
       int in_id = input_mapping[i];
       if (in_id >= 0 && in_id < (int)inputInfos.size() && inputInfos[in_id]) {
-        if (meta) {
-          inputInfos[in_id]->name = meta->inputs[i].name;
-          inputInfos[in_id]->description = meta->inputs[i].description;
+        if (meta && !meta->inputs[i].empty()) {
+          inputInfos[in_id]->name = meta->inputs[i][0].name;
+          inputInfos[in_id]->description = meta->inputs[i][0].description;
         } else {
           inputInfos[in_id]->name = "";
           inputInfos[in_id]->description = "";
@@ -1072,9 +1072,9 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
 
       int out_id = output_mapping[i];
       if (out_id >= 0 && out_id < (int)outputInfos.size() && outputInfos[out_id]) {
-        if (meta) {
-          outputInfos[out_id]->name = meta->outputs[i].name;
-          outputInfos[out_id]->description = meta->outputs[i].description;
+        if (meta && !meta->outputs[i].empty()) {
+          outputInfos[out_id]->name = meta->outputs[i][0].name;
+          outputInfos[out_id]->description = meta->outputs[i][0].description;
         } else {
           outputInfos[out_id]->name = "";
           outputInfos[out_id]->description = "";
