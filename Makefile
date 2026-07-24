@@ -18,6 +18,7 @@ PLUGIN_NAME = MTMWorkshopSystem
 # Target to copy cards and web resources from Workshop_Computer_VCV submodule
 copy-cards:
 	@echo "Building Workshop_Computer_VCV submodule first with multicore make..."
+	@cd deps/Workshop_Computer_VCV && (git submodule update --init deps/Workshop_Computer 2>/dev/null || true) && (git submodule update --init deps/external/52_lens 2>/dev/null || true)
 	$(MAKE) -j$(sysctl -n hw.ncpu) -C deps/Workshop_Computer_VCV RACK_DIR=$(abspath $(RACK_DIR))
 	@echo "Copying card libraries and web resources from Workshop_Computer_VCV submodule..."
 	@mkdir -p res/cards
