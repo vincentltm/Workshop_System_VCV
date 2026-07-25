@@ -15,10 +15,10 @@
 #include <ctime>
 #include <fstream>
 #include <string>
-#include <sys/stat.h>
 #include <thread>
 #include <vector>
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #else
@@ -1177,7 +1177,7 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
 
     for (size_t i = 0; i < g_card_registry.size(); i++) {
       std::string card_id = g_card_registry[i].id;
-      INFO("Diagnostics: Testing card %zu/%zu: %s ...", i + 1, g_card_registry.size(), card_id.c_str());
+      INFO("Diagnostics: Testing card %lu/%lu: %s ...", (unsigned long)(i + 1), (unsigned long)g_card_registry.size(), card_id.c_str());
       try {
         // Change card without loading flash to keep it fast
         change_card_impl((int)i, false);
@@ -1562,7 +1562,7 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
     card_globals.multicore_launch_core1_fn = host_multicore_launch_core1;
 
 #ifdef _WIN32
-    std::string lib_name = "card_" + g_active_card_id + ".dll";
+    std::string lib_name = "libcard_" + g_active_card_id + ".dll";
 #elif defined(__APPLE__)
     std::string lib_name = "libcard_" + g_active_card_id + ".dylib";
 #else
@@ -1589,7 +1589,7 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
 
     char temp_name[512];
 #ifdef _WIN32
-    snprintf(temp_name, sizeof(temp_name), "%s\\card_%s_%p.dll",
+    snprintf(temp_name, sizeof(temp_name), "%s\\libcard_%s_%p.dll",
              tmp_dir.c_str(), g_active_card_id.c_str(), this);
 #elif defined(__APPLE__)
     snprintf(temp_name, sizeof(temp_name), "%s/libcard_%s_%p.dylib",
@@ -1631,12 +1631,12 @@ struct WorkshopSystem : Module, IGridConsumer, IComputerModule {
 
 #ifdef _WIN32
     card_globals.set_thread_globals_fn =
-        (void (*)(CardGlobals *))GetProcAddress((HMODULE)card_lib_handle,
-                                                "set_thread_globals");
-    card_globals.set_core1_thread_fn = (void (*)(bool))GetProcAddress(
-        (HMODULE)card_lib_handle, "set_core1_thread");
+        reinterpret_cast<void(*)(CardGlobals*)>(reinterpret_cast<void*>(GetProcAddress((HMODULE)card_lib_handle,
+                                                "set_thread_globals")));
+    card_globals.set_core1_thread_fn = reinterpret_cast<void(*)(bool)>(reinterpret_cast<void*>(GetProcAddress(
+        (HMODULE)card_lib_handle, "set_core1_thread")));
     auto run_card_fn =
-        (void (*)())GetProcAddress((HMODULE)card_lib_handle, "run_card");
+        reinterpret_cast<void(*)()>(reinterpret_cast<void*>(GetProcAddress((HMODULE)card_lib_handle, "run_card")));
 #else
     card_globals.set_thread_globals_fn =
         (void (*)(CardGlobals *))dlsym(card_lib_handle, "set_thread_globals");
@@ -5285,7 +5285,7 @@ void handle_client(socket_t client_fd) {
                                         }
                                         if (offset + msg_bytes.size() <= PICO_FLASH_SIZE_BYTES) {
                                             memcpy(module_ptr->card_globals.g_flash_memory_val + offset, msg_bytes.data(), msg_bytes.size());
-                                            DEBUG("Flashed %zu bytes to simulated memory offset 0x%lx via WebSocket", msg_bytes.size(), offset);
+                                            DEBUG("Flashed %lu bytes to simulated memory offset 0x%lx via WebSocket", (unsigned long)msg_bytes.size(), (unsigned long)offset);
                                             
                                             CardGlobals* old_instance = t_instance;
                                             t_instance = &module_ptr->card_globals;

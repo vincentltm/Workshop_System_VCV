@@ -9,17 +9,21 @@ SOURCES += src/WorkshopSystem.cpp
 SOURCES += src/Pedalboard.cpp
 SOURCES += deps/Workshop_Computer_VCV/src/cards/CardRegistry.cpp
 
-# Flags
-FLAGS += -std=c++17 -fPIC -I./src -Ideps/Workshop_Computer_VCV/src -DCOMPUTERCARD_NOIMPL -DVCV_PORT=1
+# Flags — portable cross-platform build settings
+# -Wno-deprecated-declarations: suppress sprintf deprecation in third-party Lua sources on macOS
+FLAGS += -std=c++17 -fPIC -I./src -Ideps/Workshop_Computer_VCV/src -DCOMPUTERCARD_NOIMPL -DVCV_PORT=1 -Wno-deprecated-declarations
 
 # Name of the plugin
 PLUGIN_NAME = MTMWorkshopSystem
+
+# Portable CPU count: nproc (Linux/Docker), sysctl (macOS), fallback 4
+NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Target to copy cards and web resources from Workshop_Computer_VCV submodule
 copy-cards:
 	@echo "Building Workshop_Computer_VCV submodule first with multicore make..."
 	@cd deps/Workshop_Computer_VCV && (git submodule update --init deps/Workshop_Computer 2>/dev/null || true) && (git submodule update --init deps/external/52_lens 2>/dev/null || true)
-	$(MAKE) -j$(sysctl -n hw.ncpu) -C deps/Workshop_Computer_VCV RACK_DIR=$(abspath $(RACK_DIR))
+	$(MAKE) -j$(NPROCS) -C deps/Workshop_Computer_VCV RACK_DIR=$(abspath $(RACK_DIR))
 	@echo "Copying card libraries and web resources from Workshop_Computer_VCV submodule..."
 	@mkdir -p res/cards
 	@cp -R deps/Workshop_Computer_VCV/res/cards/ res/cards/
